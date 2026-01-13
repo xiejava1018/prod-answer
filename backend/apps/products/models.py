@@ -18,20 +18,47 @@ else:
 class Product(TimeStampedModel):
     """Product model."""
 
+    # 子系统类型选择
+    SUBSYSTEM_TYPE_CHOICES = [
+        ('asset_mapping', '资产测绘与攻击面管理子系统'),
+        ('exposure_mapping', '互联网暴露面测绘运营子系统'),
+        ('big_data', '安全大数据平台子系统'),
+        ('soar', '安全管理和自动化编排子系统'),
+        ('integrated', '综合安全平台'),
+        ('other', '其他'),
+    ]
+
     name = models.CharField(max_length=200, db_index=True)
     version = models.CharField(max_length=50, blank=True)
     description = models.TextField(blank=True)
     vendor = models.CharField(max_length=200, blank=True)
     category = models.CharField(max_length=100, db_index=True, blank=True)
+    subsystem_type = models.CharField(
+        max_length=50,
+        choices=SUBSYSTEM_TYPE_CHOICES,
+        blank=True,
+        null=True,
+        db_index=True,
+        help_text='子系统类型'
+    )
+    # 技术参数元数据
+    spec_metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='技术参数元数据'
+    )
     is_active = models.BooleanField(default=True)
 
     class Meta:
         db_table = 'products'
         verbose_name = 'Product'
         verbose_name_plural = 'Products'
-        ordering = ['-created_at']
+        ordering = ['subsystem_type', '-created_at']
 
     def __str__(self):
+        subsystem_label = dict(self.SUBSYSTEM_TYPE_CHOICES).get(self.subsystem_type, '')
+        if subsystem_label:
+            return f"{self.name} ({subsystem_label})"
         return f"{self.name} {self.version or ''}".strip()
 
 
@@ -44,6 +71,17 @@ class Feature(TimeStampedModel):
         ('unmatched', 'Unmatched'),
     ]
 
+    # 指标项类型
+    INDICATOR_TYPE_CHOICES = [
+        ('product_function', '产品功能'),
+        ('performance', '性能指标'),
+        ('security', '安全要求'),
+        ('reliability', '可靠性'),
+        ('compatibility', '兼容性'),
+        ('usability', '易用性'),
+        ('other', '其他'),
+    ]
+
     product = models.ForeignKey(
         Product,
         on_delete=models.CASCADE,
@@ -53,8 +91,29 @@ class Feature(TimeStampedModel):
     feature_code = models.CharField(max_length=100, unique=True, blank=True, null=True)
     feature_name = models.CharField(max_length=200, db_index=True)
     description = models.TextField()
+    # 保留原有字段以保持兼容性
     category = models.CharField(max_length=100, db_index=True, blank=True)
     subcategory = models.CharField(max_length=100, blank=True)
+    # 新增层级结构字段
+    level1_function = models.CharField(
+        max_length=200,
+        blank=True,
+        db_index=True,
+        help_text='一级功能（用于层级结构）'
+    )
+    level2_function = models.CharField(
+        max_length=200,
+        blank=True,
+        db_index=True,
+        help_text='二级功能（用于层级结构）'
+    )
+    indicator_type = models.CharField(
+        max_length=50,
+        choices=INDICATOR_TYPE_CHOICES,
+        blank=True,
+        db_index=True,
+        help_text='指标项类型'
+    )
     importance_level = models.IntegerField(default=5)  # 1-10
     metadata = models.JSONField(default=dict, blank=True)
     is_active = models.BooleanField(default=True)
@@ -63,7 +122,7 @@ class Feature(TimeStampedModel):
         db_table = 'features'
         verbose_name = 'Feature'
         verbose_name_plural = 'Features'
-        ordering = ['category', 'subcategory', 'feature_name']
+        ordering = ['level1_function', 'level2_function', 'feature_name']
 
     def __str__(self):
         return f"{self.feature_name} - {self.product.name}"

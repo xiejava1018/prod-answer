@@ -9,6 +9,7 @@ class ProductSerializer(serializers.ModelSerializer):
     """Serializer for Product model."""
 
     features_count = serializers.SerializerMethodField()
+    subsystem_type_display = serializers.CharField(source='get_subsystem_type_display', read_only=True)
 
     class Meta:
         model = Product
@@ -19,6 +20,9 @@ class ProductSerializer(serializers.ModelSerializer):
             'description',
             'vendor',
             'category',
+            'subsystem_type',
+            'subsystem_type_display',
+            'spec_metadata',
             'is_active',
             'features_count',
             'created_at',
@@ -56,6 +60,7 @@ class FeatureSerializer(serializers.ModelSerializer):
 
     product_name = serializers.CharField(source='product.name', read_only=True)
     has_embedding = serializers.SerializerMethodField()
+    indicator_type_display = serializers.CharField(source='get_indicator_type_display', read_only=True)
 
     class Meta:
         model = Feature
@@ -68,6 +73,10 @@ class FeatureSerializer(serializers.ModelSerializer):
             'description',
             'category',
             'subcategory',
+            'level1_function',
+            'level2_function',
+            'indicator_type',
+            'indicator_type_display',
             'importance_level',
             'metadata',
             'is_active',
@@ -137,6 +146,7 @@ class FeatureListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for feature lists."""
 
     has_embedding = serializers.SerializerMethodField()
+    indicator_type_display = serializers.CharField(source='get_indicator_type_display', read_only=True)
 
     class Meta:
         model = Feature
@@ -147,6 +157,10 @@ class FeatureListSerializer(serializers.ModelSerializer):
             'description',
             'category',
             'subcategory',
+            'level1_function',
+            'level2_function',
+            'indicator_type',
+            'indicator_type_display',
             'importance_level',
             'is_active',
             'has_embedding',
@@ -196,6 +210,9 @@ class FeatureUpdateSerializer(serializers.ModelSerializer):
             'description',
             'category',
             'subcategory',
+            'level1_function',
+            'level2_function',
+            'indicator_type',
             'importance_level',
             'metadata',
             'is_active',
