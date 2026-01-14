@@ -6,9 +6,22 @@ from .views import RequirementUploadViewSet
 
 app_name = 'requirements'
 
+# ViewSet actions - use as_view to map HTTP methods to ViewSet actions
+upload_view = RequirementUploadViewSet.as_view({
+    'post': 'upload'
+})
+
+parse_text_view = RequirementUploadViewSet.as_view({
+    'post': 'parse_text'
+})
+
+supported_formats_view = RequirementUploadViewSet.as_view({
+    'get': 'supported_formats'
+})
+
 urlpatterns = [
-    # Upload endpoints (these are custom actions, not standard CRUD)
-    path('requirements/upload/', RequirementUploadViewSet.as_view({'post': 'create'}), name='requirement-upload'),
-    path('requirements/parse_text/', RequirementUploadViewSet.as_view({'post': 'parse_text'}), name='requirement-parse-text'),
-    path('requirements/supported_formats/', RequirementUploadViewSet.as_view({'get': 'supported_formats'}), name='requirement-supported-formats'),
+    # Upload endpoints
+    path('requirements/upload/', upload_view, name='requirement-upload'),
+    path('requirements/parse_text/', parse_text_view, name='requirement-parse-text'),
+    path('requirements/supported_formats/', supported_formats_view, name='requirement-supported-formats'),
 ]

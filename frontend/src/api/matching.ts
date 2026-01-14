@@ -22,11 +22,14 @@ export const matchingApi = {
     return post<CapabilityRequirement>(`${REQUIREMENTS_PREFIX}/`, data)
   },
 
-  uploadRequirement(file: File, createdBy?: string) {
+  uploadRequirement(file: File, createdBy?: string, title?: string) {
     const formData = new FormData()
     formData.append('file', file)
     if (createdBy) {
       formData.append('created_by', createdBy)
+    }
+    if (title) {
+      formData.append('title', title)
     }
     return upload<CapabilityRequirement>(`${REQUIREMENTS_PREFIX}/upload/`, formData)
   },

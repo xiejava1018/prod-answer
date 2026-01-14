@@ -10,8 +10,8 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/v1/', include('apps.products.urls')),
     path('api/v1/', include('apps.embeddings.urls')),
-    path('api/v1/', include('apps.matching.urls')),
     path('api/v1/', include('apps.requirements.urls')),
+    path('api/v1/', include('apps.matching.urls')),
     path('api/v1/', include('apps.reports.urls')),
 ]
 

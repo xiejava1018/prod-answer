@@ -50,10 +50,10 @@ export const useMatchingStore = defineStore('matching', () => {
     }
   }
 
-  async function uploadRequirement(file: File, createdBy?: string) {
+  async function uploadRequirement(file: File, createdBy?: string, title?: string) {
     loading.value = true
     try {
-      const requirement = await matchingApi.uploadRequirement(file, createdBy)
+      const requirement = await matchingApi.uploadRequirement(file, createdBy, title)
       requirements.value.unshift(requirement)
       return requirement
     } finally {

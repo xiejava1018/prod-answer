@@ -15,17 +15,20 @@ class RequirementUploadViewSet(viewsets.ViewSet):
     """
     ViewSet for requirement file uploads.
 
-    upload: Upload and parse a requirement file
+    create: Upload and parse a requirement file
+    parse_text: Parse text requirements
+    supported_formats: Get list of supported file formats
     """
 
     parser_classes = (MultiPartParser, FormParser)
 
-    def create(self, request):
+    @action(detail=False, methods=['post'], url_path='upload')
+    def upload(self, request):
         """
         Upload a requirement file and parse it.
 
         POST /api/v1/requirements/upload/
-        Form: { file, created_by? }
+        Form: { file, created_by?, title? }
         """
         serializer = RequirementUploadSerializer(data=request.data)
 
@@ -34,6 +37,7 @@ class RequirementUploadViewSet(viewsets.ViewSet):
 
         uploaded_file = serializer.validated_data['file']
         created_by = serializer.validated_data.get('created_by', '')
+        title = serializer.validated_data.get('title', '')
 
         try:
             service = FileParserService()
@@ -42,6 +46,11 @@ class RequirementUploadViewSet(viewsets.ViewSet):
                 user=created_by,
                 auto_create_requirement=True
             )
+
+            # Update title if provided
+            if title:
+                requirement.title = title
+                requirement.save()
 
             from apps.matching.serializers import CapabilityRequirementSerializer
             result_serializer = CapabilityRequirementSerializer(requirement)
@@ -53,8 +62,31 @@ class RequirementUploadViewSet(viewsets.ViewSet):
             }, status=status.HTTP_201_CREATED)
 
         except ValueError as e:
+            error_msg = str(e)
+            # Provide more detailed error information
+            if 'Unsupported file type' in error_msg:
+                error_msg = (
+                    f"{error_msg}\n\n"
+                    f"Upload file name: {uploaded_file.name}\n"
+                    f"Supported formats: Excel (.xlsx, .xls), CSV (.csv), Word (.docx)"
+                )
+            elif 'No requirements found' in error_msg:
+                error_msg = (
+                    f"{error_msg}\n\n"
+                    f"Upload file: {uploaded_file.name}\n"
+                    f"Please ensure the file contains valid requirement data.\n"
+                    f"For Excel/CSV files, ensure there are columns with headers like "
+                    f"'requirement', 'feature', 'description', 'content', or 'name'."
+                )
+            elif 'Failed to parse file' in error_msg:
+                error_msg = (
+                    f"{error_msg}\n\n"
+                    f"Upload file: {uploaded_file.name}\n"
+                    f"The file may be corrupted or in an invalid format."
+                )
+
             return Response({
-                'error': str(e)
+                'error': error_msg
             }, status=status.HTTP_400_BAD_REQUEST)
 
         except Exception as e:
@@ -68,10 +100,11 @@ class RequirementUploadViewSet(viewsets.ViewSet):
         Parse text requirements.
 
         POST /api/v1/requirements/parse_text/
-        Body: { requirement_text, created_by? }
+        Body: { requirement_text, created_by?, title? }
         """
         requirement_text = request.data.get('requirement_text', '')
         created_by = request.data.get('created_by', '')
+        title = request.data.get('title', '')
 
         if not requirement_text or not requirement_text.strip():
             return Response({
@@ -80,6 +113,7 @@ class RequirementUploadViewSet(viewsets.ViewSet):
 
         try:
             requirement = RequirementService.create_text_requirement(
+                title=title,
                 requirement_text=requirement_text,
                 user=created_by
             )
