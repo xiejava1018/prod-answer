@@ -1,6 +1,7 @@
 """
 API views for Product and Feature management.
 """
+import os
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -17,6 +18,7 @@ from .serializers import (
     FeatureUpdateSerializer,
     BatchFeatureSerializer,
 )
+from .import_service import ProductImportService
 from apps.embeddings.services import EmbeddingServiceFactory
 import time
 
@@ -112,6 +114,66 @@ class ProductViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_201_CREATED)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['post'])
+    def import_subsystem_data(self, request):
+        """
+        Import subsystem products from JSON file.
+
+        POST /api/v1/products/import_subsystem_data/
+        Body: { json_file_path: str, vendor: str }
+        """
+        json_file_path = request.data.get('json_file_path')
+        vendor = request.data.get('vendor', '默认厂商')
+
+        if not json_file_path:
+            return Response({
+                'error': 'json_file_path is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # 检查文件是否存在
+        if not os.path.exists(json_file_path):
+            return Response({
+                'error': f'File not found: {json_file_path}'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # 执行导入
+        results = ProductImportService.import_from_json(json_file_path, vendor)
+
+        if results['success']:
+            return Response({
+                'status': 'success',
+                'message': 'Products imported successfully',
+                'products_created': results['products_created'],
+                'features_created': results['features_created']
+            }, status=status.HTTP_200_OK)
+        else:
+            return Response({
+                'status': 'error',
+                'errors': results['errors']
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['post'])
+    def clear_subsystem_data(self, request):
+        """
+        Clear all subsystem products and features.
+
+        POST /api/v1/products/clear_subsystem_data/
+        """
+        results = ProductImportService.clear_subsystem_products()
+
+        if results['success']:
+            return Response({
+                'status': 'success',
+                'message': 'Subsystem data cleared successfully',
+                'products_deleted': results['products_deleted'],
+                'features_deleted': results['features_deleted']
+            }, status=status.HTTP_200_OK)
+        else:
+            return Response({
+                'status': 'error',
+                'errors': results['errors']
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class FeatureViewSet(viewsets.ModelViewSet):
