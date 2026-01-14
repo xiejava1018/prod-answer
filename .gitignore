@@ -90,5 +90,6 @@ celerybeat.pid
 # Redis
 dump.rdb
 
-# Documentation (exclude docs directory)
-docs/
+# Documentation - exclude JSON and Excel files in docs
+docs/*.json
+docs/*.xlsx
