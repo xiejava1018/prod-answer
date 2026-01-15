@@ -93,3 +93,4 @@ dump.rdb
 # Documentation - exclude JSON and Excel files in docs
 docs/*.json
 docs/*.xlsx
+backend/media/
