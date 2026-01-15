@@ -55,6 +55,10 @@ class MatchingService:
                 requirement_id=requirement_id
             )
 
+            # Delete old match records for this requirement to avoid duplicates
+            MatchRecord.objects.filter(requirement_id=requirement_id).delete()
+            print(f"Deleted old match records for requirement {requirement_id}")
+
             # Generate embeddings if needed
             if generate_embeddings:
                 self._generate_embeddings_for_items(requirement_items)
@@ -76,21 +80,45 @@ class MatchingService:
 
     def _generate_embeddings_for_items(self, items: List[RequirementItem]):
         """
-        Generate embeddings for requirement items.
+        Generate embeddings for requirement items in batches.
 
         Args:
             items: List of RequirementItem objects
         """
-        for item in items:
-            if not item.embedding:
-                # Enhance requirement text with more context for better matching
-                enhanced_text = f"需求要求：{item.item_text}。功能要求：{item.item_text}"
-                # Generate embedding using default provider
-                embedding = EmbeddingServiceFactory.encode_single_text(enhanced_text)
-                # Store embedding (we'll need to update the model to store this properly)
-                # For now, we'll store it temporarily
+        # Process items without embeddings
+        items_need_embedding = [item for item in items if not item.embedding]
+
+        if not items_need_embedding:
+            return
+
+        # Truncate text to avoid token limits (SiliconFlow has 512 token limit)
+        # Approximate: 1 token ≈ 0.75 Chinese characters, so ~300 chars is safe (~400 tokens)
+        max_length = 300
+        texts = []
+        for item in items_need_embedding:
+            text = item.item_text
+            if len(text) > max_length:
+                text = text[:max_length]
+                print(f"Truncated item text from {len(item.item_text)} to {max_length} chars")
+            texts.append(text)
+
+        # Use batch encoding with very small batch size (1) to avoid API limits
+        # SiliconFlow has a 512 token limit, so we process one item at a time
+        embeddings = EmbeddingServiceFactory.encode_batch_text(texts, batch_size=1)
+
+        # Store embeddings
+        success_count = 0
+        failed_count = 0
+        for item, embedding in zip(items_need_embedding, embeddings):
+            if embedding:  # Only save if embedding was successfully generated
                 item._embedding_vector = embedding
                 item.save()
+                success_count += 1
+            else:
+                failed_count += 1
+                print(f"Failed to generate embedding for item: {item.item_text[:50]}...")
+
+        print(f"Embedding generation complete: {success_count} succeeded, {failed_count} failed")
 
     def _perform_matching(
         self,
@@ -115,9 +143,11 @@ class MatchingService:
             if hasattr(item, '_embedding_vector'):
                 query_embedding = item._embedding_vector
             else:
-                # Generate on-the-fly with enhanced context
-                enhanced_text = f"需求要求：{item.item_text}。功能要求：{item.item_text}"
-                query_embedding = EmbeddingServiceFactory.encode_single_text(enhanced_text)
+                # Generate on-the-fly with text truncation (max 300 chars for ~400 tokens)
+                text = item.item_text
+                if len(text) > 300:
+                    text = text[:300]
+                query_embedding = EmbeddingServiceFactory.encode_single_text(text)
 
             # Find matches
             matches = self.algorithm.find_matches_using_pgvector(

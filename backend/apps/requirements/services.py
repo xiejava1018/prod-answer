@@ -3,7 +3,7 @@ Requirements service for file processing and requirement management.
 """
 import os
 import uuid
-from typing import List
+from typing import List, Dict
 from django.core.files.uploadedfile import UploadedFile
 from django.db.models import Q
 from apps.matching.models import CapabilityRequirement, RequirementItem
@@ -174,8 +174,12 @@ class FileParserService:
 
         # Create requirement record
         if auto_create_requirement:
+            # 从文件名生成默认标题（去除扩展名）
+            default_title = os.path.splitext(file.name)[0] if file.name else 'Uploaded File'
+
             requirement = CapabilityRequirement.objects.create(
                 session_id=uuid.uuid4(),
+                title=default_title,
                 requirement_type='file',
                 source_file_name=file.name,
                 status='pending',

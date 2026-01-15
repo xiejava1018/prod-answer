@@ -192,6 +192,40 @@ class EmbeddingServiceFactory:
         embeddings = cls.encode_texts([text], config_id)
         return embeddings[0] if embeddings else []
 
+    @classmethod
+    def encode_batch_text(cls, texts: List[str], config_id: Optional[str] = None, batch_size: int = 50) -> List[List[float]]:
+        """
+        Encode texts in batches to avoid API limits.
+
+        Args:
+            texts: List of texts to encode
+            config_id: Optional configuration ID (uses default if not provided)
+            batch_size: Maximum number of texts to process in each batch
+
+        Returns:
+            List of embedding vectors
+        """
+        all_embeddings = []
+
+        # Process in batches
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i + batch_size]
+            try:
+                embeddings = cls.encode_texts(batch, config_id)
+                all_embeddings.extend(embeddings)
+            except Exception as e:
+                # If batch fails, try individual items with smaller batches
+                for text in batch:
+                    try:
+                        embedding = cls.encode_single_text(text, config_id)
+                        all_embeddings.append(embedding)
+                    except Exception as item_error:
+                        print(f"Error encoding text: {str(item_error)}")
+                        # Add empty embedding to maintain order
+                        all_embeddings.append([])
+
+        return all_embeddings
+
 
 class EmbeddingService:
     """

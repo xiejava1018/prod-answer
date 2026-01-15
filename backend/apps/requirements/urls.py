@@ -20,8 +20,8 @@ supported_formats_view = RequirementUploadViewSet.as_view({
 })
 
 urlpatterns = [
-    # Upload endpoints
-    path('requirements/upload/', upload_view, name='requirement-upload'),
-    path('requirements/parse_text/', parse_text_view, name='requirement-parse-text'),
-    path('requirements/supported_formats/', supported_formats_view, name='requirement-supported-formats'),
+    # Upload endpoints - 使用 file-uploads 前缀避免与 matching app 的 requirements 路由冲突
+    path('file-uploads/upload/', upload_view, name='requirement-upload'),
+    path('file-uploads/parse_text/', parse_text_view, name='requirement-parse-text'),
+    path('file-uploads/supported_formats/', supported_formats_view, name='requirement-supported-formats'),
 ]

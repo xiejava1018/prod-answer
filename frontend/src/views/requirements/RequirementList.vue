@@ -168,7 +168,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Connection } from '@element-plus/icons-vue'
-import axios from 'axios'
+import { matchingApi } from '@/api/matching'
 import dayjs from 'dayjs'
 
 const router = useRouter()
@@ -199,18 +199,23 @@ const requirementItems = ref<any[]>([])
 const fetchRequirements = async () => {
   loading.value = true
   try {
-    const response = await axios.get('/api/v1/requirements/', {
-      params: {
-        page: pagination.value.page,
-        page_size: pagination.value.pageSize,
-        status: filters.value.status || undefined,
-        requirement_type: filters.value.type || undefined
-      }
+    const response = await matchingApi.getRequirements({
+      page: pagination.value.page,
+      page_size: pagination.value.pageSize,
+      status: filters.value.status || undefined,
+      requirement_type: filters.value.type || undefined
     })
 
-    requirements.value = response.data.results || response.data
-    pagination.value.total = response.data.count || response.data.length
+    requirements.value = response.results || []
+    pagination.value.total = response.count || 0
   } catch (error: any) {
+    // 如果是404错误（页码超出范围），回退到第一页
+    if (error.response?.status === 404 && pagination.value.page > 1) {
+      ElMessage.warning('页码超出范围，已返回第一页')
+      pagination.value.page = 1
+      await fetchRequirements()
+      return
+    }
     ElMessage.error(error.response?.data?.detail || '获取需求列表失败')
   } finally {
     loading.value = false
@@ -250,9 +255,9 @@ const goToCreate = () => {
 // 显示详情对话框
 const showDetailDialog = async (row: any) => {
   try {
-    const response = await axios.get(`/api/v1/requirements/${row.id}/`)
-    currentRequirement.value = response.data
-    requirementItems.value = response.data.items || []
+    const response = await matchingApi.getRequirement(row.id)
+    currentRequirement.value = response
+    requirementItems.value = response.items || []
     detailDialogVisible.value = true
   } catch (error: any) {
     ElMessage.error(error.response?.data?.detail || '获取需求详情失败')
@@ -285,7 +290,7 @@ const deleteRequirement = async (row: any) => {
       }
     )
 
-    await axios.delete(`/api/v1/requirements/${row.id}/`)
+    await matchingApi.deleteRequirement(row.id)
     ElMessage.success('删除成功')
     fetchRequirements()
   } catch (error: any) {

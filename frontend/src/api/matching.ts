@@ -1,7 +1,7 @@
 /**
  * Matching and requirements API
  */
-import { get, post, upload } from '@/utils/request'
+import { get, post, upload, del } from '@/utils/request'
 import type {
   CapabilityRequirement,
   MatchResult,
@@ -31,14 +31,14 @@ export const matchingApi = {
     if (title) {
       formData.append('title', title)
     }
-    return upload<CapabilityRequirement>(`${REQUIREMENTS_PREFIX}/upload/`, formData)
+    return upload<CapabilityRequirement>(`/v1/file-uploads/upload/`, formData)
   },
 
   parseRequirement(data: {
     requirement_text: string
     created_by?: string
   }) {
-    return post<CapabilityRequirement>(`${REQUIREMENTS_PREFIX}/parse_text/`, data)
+    return post<CapabilityRequirement>(`/v1/file-uploads/parse_text/`, data)
   },
 
   getRequirement(id: string) {
@@ -58,7 +58,11 @@ export const matchingApi = {
   },
 
   getSupportedFormats() {
-    return get<any>(`${REQUIREMENTS_PREFIX}/supported_formats/`)
+    return get<any>('/v1/file-uploads/supported_formats/')
+  },
+
+  deleteRequirement(id: string) {
+    return del(`${REQUIREMENTS_PREFIX}/${id}/`)
   },
 
   // Matching APIs

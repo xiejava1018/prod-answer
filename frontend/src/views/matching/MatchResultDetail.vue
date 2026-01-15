@@ -28,7 +28,7 @@
         </el-col>
         <el-col :span="6">
           <el-card shadow="hover">
-            <el-statistic title="完全匹配" :value="statistics.matched">
+            <el-statistic title="完全满足" :value="statistics.matched">
               <template #prefix>
                 <el-icon style="vertical-align: -0.125em; color: var(--el-color-success)">
                   <CircleCheck />
@@ -39,7 +39,7 @@
         </el-col>
         <el-col :span="6">
           <el-card shadow="hover">
-            <el-statistic title="部分匹配" :value="statistics.partial_matched">
+            <el-statistic title="部分满足" :value="statistics.partial_matched">
               <template #prefix>
                 <el-icon style="vertical-align: -0.125em; color: var(--el-color-warning)">
                   <Warning />
@@ -50,7 +50,7 @@
         </el-col>
         <el-col :span="6">
           <el-card shadow="hover">
-            <el-statistic title="不匹配" :value="statistics.unmatched">
+            <el-statistic title="不满足" :value="statistics.unmatched">
               <template #prefix>
                 <el-icon style="vertical-align: -0.125em; color: var(--el-color-danger)">
                   <CircleClose />
@@ -61,116 +61,73 @@
         </el-col>
       </el-row>
 
-      <!-- Tabs -->
+      <!-- Main Table with Filter -->
       <el-card>
-        <el-tabs v-model="activeTab">
-          <!-- Matched Items -->
-          <el-tab-pane label="完全匹配" name="matched">
-            <template #label>
-              <span>
-                <el-icon><SuccessFilled /></el-icon>
-                完全匹配 ({{ statistics.matched }})
-              </span>
+        <template #header>
+          <div class="card-header">
+            <span>需求规格满足度分析</span>
+            <el-select
+              v-model="filterStatus"
+              placeholder="全部"
+              clearable
+              style="width: 200px"
+              @change="handleFilterChange"
+            >
+              <el-option label="全部" value="" />
+              <el-option label="完全满足" value="matched" />
+              <el-option label="部分满足" value="partial_matched" />
+              <el-option label="不满足" value="unmatched" />
+            </el-select>
+          </div>
+        </template>
+
+        <el-table :data="filteredResults" border stripe>
+          <el-table-column type="index" label="#" width="60" />
+          <el-table-column prop="requirement_item_text" label="需求规格" min-width="300" />
+          <el-table-column label="需求规格满足度" width="150" align="center">
+            <template #default="{ row }">
+              <el-tag
+                :type="getSatisfactionType(row.match_status)"
+                size="large"
+              >
+                {{ getSatisfactionText(row.match_status) }}
+              </el-tag>
             </template>
-            <el-table :data="matchResults.results.matched" border>
-              <el-table-column type="index" label="#" width="50" />
-              <el-table-column prop="requirement_item_text" label="需求内容" min-width="200" show-overflow-tooltip />
-              <el-table-column label="匹配功能" min-width="300">
-                <template #default="{ row }">
-                  <div>
-                    <div style="font-weight: 600; margin-bottom: 4px;">{{ row.feature_name }}</div>
-                    <div style="color: #606266; font-size: 13px;">{{ row.feature_description }}</div>
-                  </div>
-                </template>
-              </el-table-column>
-              <el-table-column prop="product_name" label="产品" width="150" show-overflow-tooltip />
-              <el-table-column prop="similarity_score" label="相似度" width="120">
-                <template #default="{ row }">
-                  <el-tag type="success" size="large">
-                    {{ (row.similarity_score * 100).toFixed(1) }}%
+          </el-table-column>
+          <el-table-column label="规格满足度详细描述" min-width="400">
+            <template #default="{ row }">
+              <div class="satisfaction-detail">
+                <div class="detail-header">
+                  <el-tag :type="getSatisfactionType(row.match_status)" size="small">
+                    相似度: {{ (row.similarity_score * 100).toFixed(1) }}%
                   </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column prop="rank" label="排名" width="80" />
-            </el-table>
-
-            <el-empty
-              v-if="matchResults.results.matched.length === 0"
-              description="没有完全匹配的结果"
-            />
-          </el-tab-pane>
-
-          <!-- Partial Matched Items -->
-          <el-tab-pane label="部分匹配" name="partial_matched">
-            <template #label>
-              <span>
-                <el-icon><WarningFilled /></el-icon>
-                部分匹配 ({{ statistics.partial_matched }})
-              </span>
+                  <el-tag type="info" size="small" class="ml-10">
+                    排名: {{ row.rank }}
+                  </el-tag>
+                </div>
+                <div class="detail-content">
+                  <div class="feature-info">
+                    <span class="label">匹配功能:</span>
+                    <span class="value">{{ row.feature_name }}</span>
+                  </div>
+                  <div class="feature-desc">
+                    <span class="label">功能描述:</span>
+                    <span class="value">{{ row.feature_description }}</span>
+                  </div>
+                  <div v-if="row.product_name" class="product-info">
+                    <span class="label">产品:</span>
+                    <span class="value">{{ row.product_name }}</span>
+                  </div>
+                </div>
+              </div>
             </template>
-            <el-table :data="matchResults.results.partial_matched" border>
-              <el-table-column type="index" label="#" width="50" />
-              <el-table-column prop="requirement_item_text" label="需求内容" min-width="200" show-overflow-tooltip />
-              <el-table-column label="匹配功能" min-width="300">
-                <template #default="{ row }">
-                  <div>
-                    <div style="font-weight: 600; margin-bottom: 4px;">{{ row.feature_name }}</div>
-                    <div style="color: #606266; font-size: 13px;">{{ row.feature_description }}</div>
-                  </div>
-                </template>
-              </el-table-column>
-              <el-table-column prop="product_name" label="产品" width="150" show-overflow-tooltip />
-              <el-table-column prop="similarity_score" label="相似度" width="120">
-                <template #default="{ row }">
-                  <el-tag type="warning" size="large">
-                    {{ (row.similarity_score * 100).toFixed(1) }}%
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column prop="rank" label="排名" width="80" />
-            </el-table>
+          </el-table-column>
+        </el-table>
 
-            <el-empty
-              v-if="matchResults.results.partial_matched.length === 0"
-              description="没有部分匹配的结果"
-            />
-          </el-tab-pane>
-
-          <!-- Unmatched Items -->
-          <el-tab-pane label="不匹配" name="unmatched">
-            <template #label>
-              <span>
-                <el-icon><CircleClose /></el-icon>
-                不匹配 ({{ statistics.unmatched }})
-              </span>
-            </template>
-            <el-table :data="matchResults.results.unmatched" border>
-              <el-table-column type="index" label="#" width="50" />
-              <el-table-column prop="requirement_item_text" label="需求内容" min-width="200" show-overflow-tooltip />
-              <el-table-column label="最佳匹配功能" min-width="300">
-                <template #default="{ row }">
-                  <div>
-                    <div style="font-weight: 600; margin-bottom: 4px;">{{ row.feature_name }}</div>
-                    <div style="color: #606266; font-size: 13px;">{{ row.feature_description }}</div>
-                  </div>
-                </template>
-              </el-table-column>
-              <el-table-column prop="similarity_score" label="相似度" width="120">
-                <template #default="{ row }">
-                  <el-tag type="danger" size="large">
-                    {{ (row.similarity_score * 100).toFixed(1) }}%
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column prop="rank" label="排名" width="80" />
-            </el-table>
-
-            <el-empty
-              v-if="matchResults.results.unmatched.length === 0"
-              description="没有不匹配的结果"
-            />
-          </el-tab-pane>
-        </el-tabs>
+        <el-empty
+          v-if="filteredResults.length === 0"
+          description="暂无数据"
+        />
       </el-card>
 
       <!-- Statistics -->
@@ -238,13 +195,12 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useMatchingStore } from '@/store'
 import { ElMessage } from 'element-plus'
+import * as XLSX from 'xlsx'
 import {
   Document,
   CircleCheck,
   Warning,
   CircleClose,
-  SuccessFilled,
-  WarningFilled,
   TrendCharts,
   Top,
   Bottom,
@@ -255,7 +211,7 @@ const route = useRoute()
 const matchingStore = useMatchingStore()
 
 const loading = ref(true)
-const activeTab = ref('matched')
+const filterStatus = ref('')
 
 const requirementId = computed(() => route.params.id as string)
 
@@ -270,6 +226,51 @@ const statistics = computed(() => matchResults.value?.statistics || {
   max_similarity: 0,
   min_similarity: 0
 })
+
+// 合并所有匹配结果到一个数组
+const allResults = computed(() => {
+  const results = matchResults.value?.results
+  if (!results) return []
+
+  return [
+    ...(results.matched || []).map((item: any) => ({ ...item, match_status: 'matched' })),
+    ...(results.partial_matched || []).map((item: any) => ({ ...item, match_status: 'partial_matched' })),
+    ...(results.unmatched || []).map((item: any) => ({ ...item, match_status: 'unmatched' }))
+  ]
+})
+
+// 根据筛选条件过滤结果
+const filteredResults = computed(() => {
+  if (!filterStatus.value) {
+    return allResults.value
+  }
+  return allResults.value.filter((item: any) => item.match_status === filterStatus.value)
+})
+
+// 获取满足度类型
+const getSatisfactionType = (status: string) => {
+  const typeMap: Record<string, any> = {
+    matched: 'success',
+    partial_matched: 'warning',
+    unmatched: 'danger'
+  }
+  return typeMap[status] || 'info'
+}
+
+// 获取满足度文本
+const getSatisfactionText = (status: string) => {
+  const textMap: Record<string, string> = {
+    matched: '完全满足',
+    partial_matched: '部分满足',
+    unmatched: '不满足'
+  }
+  return textMap[status] || status
+}
+
+// 筛选条件变化处理
+const handleFilterChange = () => {
+  // 筛选逻辑已在 computed 中处理
+}
 
 onMounted(async () => {
   await loadResults()
@@ -287,8 +288,76 @@ async function loadResults() {
 }
 
 function handleExport() {
-  ElMessage.info('导出功能开发中...')
-  // TODO: Implement export functionality
+  try {
+    // 获取需求标题
+    const requirementTitle = matchResults.value?.requirement?.title || '需求匹配报告'
+
+    // 1. 创建汇总表
+    const summaryData = [
+      ['需求匹配分析报告'],
+      ['需求名称', requirementTitle],
+      [''],
+      ['统计项', '数值'],
+      ['总需求数', statistics.value.total_items],
+      ['完全满足', statistics.value.matched],
+      ['部分满足', statistics.value.partial_matched],
+      ['不满足', statistics.value.unmatched],
+      ['平均相似度', (statistics.value.avg_similarity * 100).toFixed(2) + '%'],
+      ['最高相似度', (statistics.value.max_similarity * 100).toFixed(2) + '%'],
+      ['最低相似度', (statistics.value.min_similarity * 100).toFixed(2) + '%']
+    ]
+
+    // 2. 创建详情表
+    const detailData = [
+      ['序号', '需求规格', '需求规格满足度', '相似度', '排名', '匹配功能', '功能描述', '产品']
+    ]
+
+    allResults.value.forEach((item: any, index: number) => {
+      detailData.push([
+        index + 1,
+        item.requirement_item_text,
+        getSatisfactionText(item.match_status),
+        (item.similarity_score * 100).toFixed(1) + '%',
+        item.rank,
+        item.feature_name,
+        item.feature_description,
+        item.product_name || ''
+      ])
+    })
+
+    // 3. 创建工作簿
+    const wb = XLSX.utils.book_new()
+
+    // 4. 添加汇总表
+    const wsSummary = XLSX.utils.aoa_to_sheet(summaryData)
+    // 设置列宽
+    wsSummary['!cols'] = [{ wch: 20 }, { wch: 30 }]
+    XLSX.utils.book_append_sheet(wb, wsSummary, '汇总统计')
+
+    // 5. 添加详情表
+    const wsDetail = XLSX.utils.aoa_to_sheet(detailData)
+    // 设置列宽
+    wsDetail['!cols'] = [
+      { wch: 8 },   // 序号
+      { wch: 50 },  // 需求规格
+      { wch: 15 },  // 需求规格满足度
+      { wch: 12 },  // 相似度
+      { wch: 10 },  // 排名
+      { wch: 30 },  // 匹配功能
+      { wch: 50 },  // 功能描述
+      { wch: 20 }   // 产品
+    ]
+    XLSX.utils.book_append_sheet(wb, wsDetail, '详细结果')
+
+    // 6. 导出文件
+    const fileName = `${requirementTitle}_匹配报告_${new Date().getTime()}.xlsx`
+    XLSX.writeFile(wb, fileName)
+
+    ElMessage.success('导出成功！')
+  } catch (error) {
+    console.error('Export error:', error)
+    ElMessage.error('导出失败，请检查是否已安装 xlsx 库')
+  }
 }
 </script>
 
@@ -306,5 +375,43 @@ function handleExport() {
 
 .mt-20 {
   margin-top: 20px;
+}
+
+.ml-10 {
+  margin-left: 10px;
+}
+
+.satisfaction-detail {
+  .detail-header {
+    margin-bottom: 8px;
+  }
+
+  .detail-content {
+    .feature-info,
+    .feature-desc,
+    .product-info {
+      margin-bottom: 6px;
+
+      &:last-child {
+        margin-bottom: 0;
+      }
+
+      .label {
+        font-weight: 600;
+        color: #606266;
+        margin-right: 8px;
+      }
+
+      .value {
+        color: #303133;
+      }
+    }
+
+    .feature-desc {
+      .label {
+        margin-left: 0;
+      }
+    }
+  }
 }
 </style>

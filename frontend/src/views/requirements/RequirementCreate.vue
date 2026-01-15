@@ -23,6 +23,7 @@
             v-model="title"
             placeholder="请输入需求名称"
             clearable
+            @input="handleTitleInput"
           />
         </el-form-item>
 
@@ -187,6 +188,7 @@ const submitting = ref(false)
 const selectedFile = ref<File | null>(null)
 const uploadRef = ref()
 const activeTab = ref('text')
+const titleAutoFilled = ref(false) // 标记需求名称是否是从文件名自动填充的
 
 const createdRequirements = ref<RequirementItem[]>([])
 const currentRequirementId = ref<string | null>(null)
@@ -218,6 +220,13 @@ const submitButtonText = computed(() => {
 })
 
 // Methods
+function handleTitleInput() {
+  // 用户手动修改需求名称，取消自动填充标记
+  if (titleAutoFilled.value) {
+    titleAutoFilled.value = false
+  }
+}
+
 function handleTextChange() {
   if (textContent.value.trim()) {
     selectedFile.value = null
@@ -249,12 +258,31 @@ function handleFileChange(file: UploadFile) {
 
     selectedFile.value = file.raw
     textContent.value = ''
+
+    // 如果需求名称为空，自动使用文件名（去除扩展名）作为需求名称
+    if (!title.value.trim()) {
+      const fileName = file.name
+      const lastDotIndex = fileName.lastIndexOf('.')
+      if (lastDotIndex > 0) {
+        title.value = fileName.substring(0, lastDotIndex)
+      } else {
+        title.value = fileName
+      }
+      titleAutoFilled.value = true // 标记为自动填充
+    } else {
+      titleAutoFilled.value = false // 用户已手动输入，不是自动填充
+    }
   }
 }
 
 function handleFileRemove() {
   selectedFile.value = null
   parsingError.value = null
+  // 如果需求名称是从文件名自动填充的，删除文件时也清空需求名称
+  if (titleAutoFilled.value) {
+    title.value = ''
+    titleAutoFilled.value = false
+  }
 }
 
 function handleExceed() {
