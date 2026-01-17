@@ -62,7 +62,11 @@
           </template>
         </el-table-column>
         <el-table-column prop="items_count" label="需求数量" width="120" align="center" />
-        <el-table-column prop="created_at" label="创建时间" width="180" />
+        <el-table-column prop="created_at" label="创建时间" width="180">
+          <template #default="{ row }">
+            {{ formatDate(row.created_at) }}
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="280" fixed="right" align="center">
           <template #default="{ row }">
             <el-button
@@ -169,7 +173,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Connection } from '@element-plus/icons-vue'
 import { matchingApi } from '@/api/matching'
-import dayjs from 'dayjs'
+import { formatDate } from '@/utils/date'
 
 const router = useRouter()
 
@@ -240,11 +244,6 @@ const getStatusText = (status: string) => {
     failed: '失败'
   }
   return statusMap[status] || status
-}
-
-// 格式化日期
-const formatDate = (date: string) => {
-  return date ? dayjs(date).format('YYYY-MM-DD HH:mm:ss') : '-'
 }
 
 // 跳转到创建页面

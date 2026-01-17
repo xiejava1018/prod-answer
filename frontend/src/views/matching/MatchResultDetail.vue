@@ -94,31 +94,49 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="规格满足度详细描述" min-width="400">
+          <el-table-column label="规格满足度详细描述" min-width="500">
             <template #default="{ row }">
-              <div class="satisfaction-detail">
-                <div class="detail-header">
-                  <el-tag :type="getSatisfactionType(row.match_status)" size="small">
-                    相似度: {{ (row.similarity_score * 100).toFixed(1) }}%
-                  </el-tag>
-                  <el-tag type="info" size="small" class="ml-10">
-                    排名: {{ row.rank }}
-                  </el-tag>
+              <div v-if="row.matches && row.matches.length > 0" class="satisfaction-detail">
+                <!-- 显示所有匹配的功能，按相似度排序 -->
+                <div
+                  v-for="(match, index) in row.matches"
+                  :key="index"
+                  class="match-item"
+                  :class="{ 'is-best': index === 0 }"
+                >
+                  <div class="detail-header">
+                    <el-tag
+                      :type="getSatisfactionType(row.match_status)"
+                      size="small"
+                    >
+                      相似度: {{ (match.similarity_score * 100).toFixed(1) }}%
+                    </el-tag>
+                    <el-tag type="info" size="small" class="ml-10">
+                      排名: {{ match.rank }}
+                    </el-tag>
+                    <el-tag v-if="index === 0" type="success" size="small" class="ml-10">
+                      最佳匹配
+                    </el-tag>
+                  </div>
+                  <div class="detail-content">
+                    <div class="feature-info">
+                      <span class="label">匹配功能:</span>
+                      <span class="value">{{ match.feature_name }}</span>
+                    </div>
+                    <div class="feature-desc">
+                      <span class="label">功能描述:</span>
+                      <span class="value">{{ match.feature_description }}</span>
+                    </div>
+                    <div v-if="match.product_name" class="product-info">
+                      <span class="label">产品:</span>
+                      <span class="value">{{ match.product_name }}</span>
+                    </div>
+                  </div>
+                  <el-divider v-if="index < (row.matches?.length || 1) - 1" />
                 </div>
-                <div class="detail-content">
-                  <div class="feature-info">
-                    <span class="label">匹配功能:</span>
-                    <span class="value">{{ row.feature_name }}</span>
-                  </div>
-                  <div class="feature-desc">
-                    <span class="label">功能描述:</span>
-                    <span class="value">{{ row.feature_description }}</span>
-                  </div>
-                  <div v-if="row.product_name" class="product-info">
-                    <span class="label">产品:</span>
-                    <span class="value">{{ row.product_name }}</span>
-                  </div>
-                </div>
+              </div>
+              <div v-else class="no-match">
+                <el-text type="info">未找到匹配的功能</el-text>
               </div>
             </template>
           </el-table-column>
@@ -140,8 +158,9 @@
 
         <el-row :gutter="20">
           <el-col :span="8">
-            <el-statistic title="平均相似度" :value="(statistics.avg_similarity * 100).toFixed(2) + '%'">
+            <el-statistic title="平均相似度" :value="statistics.avg_similarity * 100" :precision="2">
               <template #suffix>
+                <span>%</span>
                 <el-icon style="vertical-align: -0.125em">
                   <TrendCharts />
                 </el-icon>
@@ -149,8 +168,9 @@
             </el-statistic>
           </el-col>
           <el-col :span="8">
-            <el-statistic title="最高相似度" :value="(statistics.max_similarity * 100).toFixed(2) + '%'">
+            <el-statistic title="最高相似度" :value="statistics.max_similarity * 100" :precision="2">
               <template #suffix>
+                <span>%</span>
                 <el-icon style="vertical-align: -0.125em; color: var(--el-color-success)">
                   <Top />
                 </el-icon>
@@ -158,8 +178,9 @@
             </el-statistic>
           </el-col>
           <el-col :span="8">
-            <el-statistic title="最低相似度" :value="(statistics.min_similarity * 100).toFixed(2) + '%'">
+            <el-statistic title="最低相似度" :value="statistics.min_similarity * 100" :precision="2">
               <template #suffix>
+                <span>%</span>
                 <el-icon style="vertical-align: -0.125em; color: var(--el-color-info)">
                   <Bottom />
                 </el-icon>
@@ -232,11 +253,41 @@ const allResults = computed(() => {
   const results = matchResults.value?.results
   if (!results) return []
 
-  return [
+  const flatResults = [
     ...(results.matched || []).map((item: any) => ({ ...item, match_status: 'matched' })),
     ...(results.partial_matched || []).map((item: any) => ({ ...item, match_status: 'partial_matched' })),
     ...(results.unmatched || []).map((item: any) => ({ ...item, match_status: 'unmatched' }))
   ]
+
+  // 按需求规格分组
+  const grouped = new Map<string, any[]>()
+
+  flatResults.forEach((item: any) => {
+    const key = item.requirement_item_id || item.requirement_item_text
+    if (!grouped.has(key)) {
+      grouped.set(key, [])
+    }
+    grouped.get(key)!.push(item)
+  })
+
+  // 为每组创建一条记录，包含所有匹配的功能
+  return Array.from(grouped.entries()).map(([, items]) => {
+    // 按相似度排序
+    const sortedItems = items.sort((a, b) => (b.similarity_score || 0) - (a.similarity_score || 0))
+
+    // 取相似度最高的作为该组的满足度状态
+    const bestMatch = sortedItems[0]
+
+    return {
+      requirement_item_id: bestMatch.requirement_item_id,
+      requirement_item_text: bestMatch.requirement_item_text,
+      match_status: bestMatch.match_status,
+      similarity_score: bestMatch.similarity_score,
+      rank: bestMatch.rank,
+      // 保存所有匹配的功能用于展示
+      matches: sortedItems
+    }
+  })
 })
 
 // 根据筛选条件过滤结果
@@ -382,6 +433,23 @@ function handleExport() {
 }
 
 .satisfaction-detail {
+  .match-item {
+    padding: 12px;
+    margin-bottom: 8px;
+    border-radius: 4px;
+    border: 1px solid #e4e7ed;
+    background-color: #fafafa;
+
+    &.is-best {
+      border-color: #67c23a;
+      background-color: #f0f9ff;
+    }
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+
   .detail-header {
     margin-bottom: 8px;
   }
@@ -413,5 +481,15 @@ function handleExport() {
       }
     }
   }
+}
+
+.no-match {
+  padding: 12px;
+  text-align: center;
+  color: #909399;
+}
+
+.ml-10 {
+  margin-left: 10px;
 }
 </style>

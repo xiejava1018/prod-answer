@@ -7,7 +7,7 @@ import { ElMessage } from 'element-plus'
 // Create axios instance
 const service: AxiosInstance = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
-  timeout: 60000,
+  timeout: 300000, // 5 minutes - increased for large file matching
   headers: {
     'Content-Type': 'application/json'
   }

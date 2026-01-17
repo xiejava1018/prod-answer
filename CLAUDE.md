@@ -13,6 +13,11 @@ This is a **Product Capability Matching System** (产品能力匹配系统) - an
 4. Requirements are matched against features using cosine similarity
 5. Results are classified as: matched (≥0.85), partial (0.75-0.85), or unmatched (<0.75)
 
+**Tech Stack:**
+- **Backend:** Django 4.2 + DRF + PostgreSQL with pgvector
+- **Frontend:** Vue 3 + TypeScript + Element Plus + Pinia
+- **AI/ML:** OpenAI API, Sentence-Transformers, Celery for async tasks
+
 ## Development Commands
 
 ### Backend (Django)
@@ -20,29 +25,42 @@ This is a **Product Capability Matching System** (产品能力匹配系统) - an
 ```bash
 cd backend
 
-# Environment setup
+# Create and activate virtual environment
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
+
+# Install dependencies
 pip install -r requirements.txt
 
-# Database operations
+# Environment setup
+cp .env.example .env
+# Edit .env with your database and API keys
+
+# Database setup (PostgreSQL with pgvector)
+createdb prod_answer
+psql -d prod_answer -c "CREATE EXTENSION vector;"
+
+# Run migrations
 python manage.py makemigrations
 python manage.py migrate
+
+# Create superuser
 python manage.py createsuperuser
+
+# Initialize embedding configuration (creates default embedding model)
+python manage.py init_embedding_config
 
 # Run development server
 python manage.py runserver
 
-# Run tests
-python manage.py test
+# Run with specific settings module
+DJANGO_SETTINGS_MODULE=config.settings.testing python manage.py test
 
-# Django Admin
-# Access at http://localhost:8000/admin/
+# Testing with SQLite (for CI/fast tests)
+USE_SQLITE=True DJANGO_SETTINGS_MODULE=config.settings.testing python manage.py test
 ```
 
-**Important:** This project requires PostgreSQL with pgvector extension for production. For testing, set `USE_SQLITE=True` to use SQLite (vector operations will be degraded).
-
-### Frontend (Vue 3 + TypeScript)
+### Frontend (Vue 3)
 
 ```bash
 cd frontend
@@ -53,7 +71,7 @@ npm install
 # Development server
 npm run dev
 
-# Build for production
+# Type check + Build for production
 npm run build
 
 # Preview production build
@@ -63,208 +81,214 @@ npm run preview
 npm run lint
 ```
 
-Frontend dev server runs on http://localhost:5173 and proxies `/api` requests to backend on port 8000.
-
-### Database Setup (PostgreSQL)
+### Database Operations
 
 ```bash
-# Create database
-createdb prod_answer
+# Access PostgreSQL
+psql -d prod_answer
 
-# Enable pgvector extension
-psql -d prod_answer -c "CREATE EXTENSION vector;"
+# Check pgvector extension
+SELECT * FROM pg_extension WHERE extname = 'vector';
+
+# Reset database (WARNING: deletes all data)
+DROP DATABASE prod_answer;
+CREATE DATABASE prod_answer;
+\c prod_answer
+CREATE EXTENSION vector;
 ```
 
 ## Architecture
 
-### Backend Structure (Django Apps)
+### Backend Structure
 
-The backend follows a **modular Django apps architecture**:
+```
+backend/
+├── config/                  # Django configuration
+│   ├── settings/           # Environment-specific settings
+│   │   ├── base.py         # Base settings
+│   │   ├── development.py  # Dev overrides
+│   │   ├── production.py   # Production overrides
+│   │   └── testing.py      # Test settings
+│   └── urls.py             # Root URL configuration
+├── apps/
+│   ├── core/               # Base models (TimeStampedModel)
+│   ├── products/           # Product & Feature management
+│   ├── embeddings/         # Embedding service & provider factory
+│   ├── matching/           # Matching algorithm & processing
+│   ├── requirements/       # Requirements & file parsing
+│   └── reports/            # Report generation
+└── manage.py
+```
 
-- **`apps/core/`** - Base models (TimeStampedModel), shared utilities
-- **`apps/products/`** - Product and Feature models with hierarchical structure support
-- **`apps/embeddings/`** - Multi-provider AI embedding services (OpenAI, HuggingFace, custom)
-- **`apps/matching/`** - Semantic similarity matching algorithms and cosine similarity calculations
-- **`apps/requirements/`** - File parsing (Excel, CSV, Word) and requirement extraction
-- **`apps/reports/`** - Report generation and export functionality
+### Core Concepts
 
-**Key Patterns:**
-- **Provider Pattern** - Extensible embedding providers in `apps/embeddings/providers/`
-- **Strategy Pattern** - Pluggable matching algorithms in `apps/matching/services.py`
-- **Factory Pattern** - Service instantiation (e.g., `EmbeddingServiceFactory`)
-- **Parser Pattern** - File parsers in `apps/requirements/parsers/` (base.py, csv_parser.py, excel_parser.py, word_parser.py)
+**1. Embedding Provider Factory Pattern**
+- `EmbeddingServiceFactory` (apps/embeddings/services.py) manages multiple embedding providers
+- Supported providers: OpenAI, Sentence-Transformers, OpenAI-compatible (SiliconFlow, ZhipuAI, Qwen)
+- New providers can be registered via `register_provider()`
+- Provider instances are cached by config ID
 
-**Database Models:**
-- `Product` - Products with metadata, category, and subsystem_type
-- `Feature` - Hierarchical features with VectorField for embeddings
-- `Requirement` - User requirements from text or file uploads
-- `EmbeddingModelConfig` - AI model configurations (OpenAI, local models)
-- `MatchResult` - Matching results with similarity scores
+**2. Matching Algorithm**
+- Uses cosine similarity on pgvector embeddings
+- Threshold-based classification:
+  - **Full match**: ≥ 0.85
+  - **Partial match**: 0.75 - 0.85
+  - **No match**: < 0.75
+- Thresholds are configurable per-request
 
-### Frontend Structure (Vue 3)
+**3. File Parser Architecture**
+- `FileParserService` supports Excel, CSV, Word files
+- Each parser inherits from `BaseFileParser`
+- Mapped by MIME type in `PARSERS` dictionary
+- Auto-detects file type by extension
 
-- **`src/api/`** - Axios API client with typed interfaces
-- **`src/views/`** - Vue components (Composition API with `<script setup>`)
-- **`src/store/`** - Pinia state management
-- **`src/router/`** - Vue Router configuration
-- **`src/utils/`** - Utility functions
+**4. Product Hierarchy**
+- Products can have `subsystem_type` (asset_mapping, exposure_mapping, big_data, soar, etc.)
+- Features have hierarchical levels: `level1_function` → `level2_function` → `level3_function`
+- Features include `indicator_type` (product_function, performance, security, etc.)
+- `spec_metadata` JSON field stores technical parameters
 
-**Key Features:**
-- Auto-imports for Vue components and composables (unplugin-auto-import)
-- Element Plus UI library with auto-registration
-- TypeScript with strict typing
-- Vite for fast development and optimized builds
+### Frontend Structure
 
-### API Endpoints
+```
+frontend/src/
+├── api/              # API service layer (Axios instances)
+├── components/       # Reusable Vue components
+├── router/           # Vue Router configuration
+├── store/            # Pinia stores
+├── types/            # TypeScript type definitions
+├── utils/            # Utility functions
+└── views/            # Page components
+```
 
-All APIs are prefixed with `/api/v1/`:
+## API Endpoints
+
+Base URL: `http://localhost:8000/api/v1/`
 
 **Products:**
-- `GET /api/v1/products/` - List products (with filtering, search, pagination)
-- `POST /api/v1/products/` - Create product
-- `GET /api/v1/products/{id}/` - Product detail
-- `GET /api/v1/products/{id}/features/` - List features
-- `POST /api/v1/products/{id}/features/` - Add feature
-
-**Embeddings:**
-- `GET /api/v1/embeddings/configs/` - List embedding model configs
-- `POST /api/v1/embeddings/configs/` - Create config
-- `POST /api/v1/embeddings/test-connection/{id}/` - Test API connectivity
-- `POST /api/v1/embeddings/generate-batch/` - Batch generate embeddings
+- `GET /products/` - List products (filterable by subsystem_type, category)
+- `POST /products/` - Create product
+- `GET /products/{id}/features/` - List features
+- `POST /products/{id}/features/` - Add feature
 
 **Requirements:**
-- `POST /api/v1/requirements/` - Create requirement (text or file)
-- `GET /api/v1/requirements/{id}/` - Get requirement detail
+- `POST /requirements/` - Create requirement from text or file
+- `GET /requirements/{id}/` - Get requirement details
 
 **Matching:**
-- `POST /api/v1/matching/analyze` - Run matching analysis
-- `GET /api/v1/matching/results/{req_id}/` - Get match results
+- `POST /matching/analyze` - Perform matching analysis
+  ```json
+  {
+    "requirement_id": "uuid",
+    "threshold": 0.75
+  }
+  ```
+- `GET /matching/results/{req_id}/` - Get matching results
 
-**Reports:**
-- `POST /api/v1/reports/export/` - Export report (Excel/CSV/PDF)
+**Embeddings:**
+- `GET /embeddings/configs/` - List embedding configurations
+- `POST /embeddings/configs/` - Create configuration
+- `POST /embeddings/test-connection/{id}/` - Test provider connection
 
 ## Configuration
 
-### Environment Variables (.env)
+### Embedding Models (Required for Semantic Matching)
 
-Required in backend directory:
+Embedding models must be configured via Django Admin or API before matching works:
 
-```bash
-# Database
-DB_NAME=prod_answer
-DB_USER=postgres
-DB_PASSWORD=your_password
-DB_HOST=localhost
-DB_PORT=5432
+1. **Access Admin:** http://localhost:8000/admin
+2. **Configure Model:**
+   - Go to "Embedding Model Configs"
+   - Create config with:
+     - `provider`: openai, sentence-transformers, openai-compatible, siliconflow, zhipuai, qwen
+     - `model_name`: e.g., "text-embedding-3-small"
+     - `dimension`: 1536 for OpenAI, 384 for all-MiniLM-L6-v2
+     - `is_default`: true
+     - `api_key_encrypted`: API key (encrypted at rest)
 
-# Django
-SECRET_KEY=your-secret-key
-DEBUG=True
-ALLOWED_HOSTS=localhost,127.0.0.1
+3. **Or use management command:**
+   ```bash
+   python manage.py init_embedding_config
+   ```
 
-# OpenAI (optional - for OpenAI embeddings)
-OPENAI_API_KEY=your-api-key
+### Environment Variables
 
-# Celery (optional - for async tasks)
-CELERY_BROKER_URL=redis://localhost:6379/0
-CELERY_RESULT_BACKEND=redis://localhost:6379/0
+Key variables in `.env`:
+- `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT` - PostgreSQL config
+- `OPENAI_API_KEY` - OpenAI API key
+- `ENCRYPTION_KEY` - Fernet key for encrypting API keys
+- `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND` - Redis for Celery
+- `SECRET_KEY` - Django secret key
+- `DEBUG` - Debug mode (True/False)
+- `ALLOWED_HOSTS` - Comma-separated hostnames
 
-# Encryption
-ENCRYPTION_KEY=your-encryption-key
-```
+## Development Patterns
 
-### Django Settings
-
-Settings are split by environment:
-- `config/settings/base.py` - Common settings
-- `config/settings/development.py` - Development overrides
-- `config/settings/production.py` - Production overrides
-- `config/settings/test.py` - Test configuration
-
-**Key configurations:**
-- Language: `zh-hans` (Chinese)
-- Timezone: `Asia/Shanghai`
-- REST Framework: Session authentication, pagination, filtering
-- CORS: Allows frontend on localhost:5173
-- Logging: Console + file (logs/django.log)
-
-## Adding New Features
-
-### New Embedding Provider
+### Adding a New Embedding Provider
 
 1. Create provider class in `apps/embeddings/providers/`:
-```python
-from apps.embeddings.providers.base import BaseEmbeddingProvider
+   ```python
+   from .base import BaseEmbeddingProvider
 
-class MyProvider(BaseEmbeddingProvider):
-    def encode(self, texts):
-        # Return list of vectors
-        pass
+   class MyProvider(BaseEmbeddingProvider):
+       def encode(self, texts):
+           # Return list of embedding vectors
+           pass
+   ```
 
-    def test_connection(self):
-        # Test API connectivity
-        pass
-```
+2. Register in `apps/embeddings/services.py`:
+   ```python
+   EmbeddingServiceFactory.register_provider('my-provider', MyProvider)
+   ```
 
-2. Register in factory (check `apps/embeddings/services.py`)
+3. Add to `provider` field choices in `EmbeddingModelConfig` model
 
-### New File Parser
+### Adding a New File Parser
 
 1. Create parser in `apps/requirements/parsers/`:
-```python
-from apps.requirements.parsers.base import BaseFileParser
+   ```python
+   from .base import BaseFileParser
 
-class MyParser(BaseFileParser):
-    def parse(self, file_path):
-        # Return list of requirement texts
-        pass
-```
+   class MyParser(BaseFileParser):
+       def parse(self, file_path):
+           # Return list of requirement texts
+           pass
+   ```
 
-2. Register in `apps/requirements/services.py`
+2. Register in `apps/requirements/services.py`:
+   ```python
+   FileParserService.PARSERS['mime/type'] = MyParser
+   ```
 
-### Frontend Component
+### Testing
 
-- Use `<script setup lang="ts">` with Composition API
-- Components are auto-imported (no manual imports needed)
-- Use Element Plus components directly
-- API calls go through `src/api/` with typed interfaces
+- Use `USE_SQLITE=True` environment variable for faster tests with SQLite
+- Test settings in `config/settings/testing.py`
+- pgvector field becomes JSONField in SQLite mode
+- See products/models.py:11-15 for conditional VectorField import
 
 ## Important Notes
 
-- **PostgreSQL + pgvector** is required for full vector search functionality
-- **SQLite fallback** exists for testing but with degraded features
-- **Chinese language** support is enabled (`LANGUAGE_CODE='zh-hans'`)
-- **Session authentication** is used (JWT planned for future)
-- **Celery** is optional but recommended for async embedding generation
-- **Logging** is configured to both console and `backend/logs/django.log`
+- **pgvector Required:** System requires PostgreSQL with pgvector extension for production
+- **Embedding Config:** Matching will fail without a configured embedding model
+- **Async Processing:** Celery is configured but not strictly required for basic functionality
+- **Chinese Language:** System defaults to `LANGUAGE_CODE='zh-hans'` and `TIME_ZONE='Asia/Shanghai'`
+- **Media Uploads:** Files stored in `backend/media/uploads/`
+- **CORS:** Frontend origins (localhost:5173, localhost:3000) pre-configured
 
-## Troubleshooting
+## Common Issues
 
-**Python version compatibility:** Use Python 3.11 or 3.12 (Python 3.14 may have dependency issues)
+**"Unsupported provider type" error:**
+→ Register new provider in `EmbeddingServiceFactory._providers`
 
-**pgvector issues:** Ensure extension is enabled: `psql -d prod_answer -c "CREATE EXTENSION vector;"`
+**VectorField not found:**
+→ Ensure pgvector extension is installed: `CREATE EXTENSION vector;`
 
-**CORS errors:** Check `CORS_ALLOWED_ORIGINS` in `config/settings/base.py`
+**Embedding generation fails:**
+→ Check API key configuration and test connection via admin or API
 
-**Embedding failures:** Verify API keys in Django Admin or environment variables
+**Frontend can't reach backend:**
+→ Check CORS settings in `config/settings/base.py` and ensure backend is running
 
-## Testing
-
-The project has minimal test coverage. Tests can be run with:
-```bash
-# Backend
-cd backend
-python manage.py test
-
-# Frontend (not configured yet)
-cd frontend
-npm run test  # Not set up
-```
-
-## Documentation
-
-- `README.md` - Project overview and setup
-- `docs/STARTUP_GUIDE.md` - Detailed startup instructions
-- `docs/API.md` - Complete API documentation
-- `docs/EMBEDDING_GUIDE.md` - AI/ML configuration guide
-- `docs/SUPABASE_MIGRATION_GUIDE.md` - Database migration instructions
+**Migration conflicts:**
+→ Run `python manage.py makemigrations --merge` if needed
