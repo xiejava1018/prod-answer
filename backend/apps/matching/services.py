@@ -102,9 +102,10 @@ class MatchingService:
                 print(f"Truncated item text from {len(item.item_text)} to {max_length} chars")
             texts.append(text)
 
-        # Use batch encoding with very small batch size (1) to avoid API limits
-        # SiliconFlow has a 512 token limit, so we process one item at a time
-        embeddings = EmbeddingServiceFactory.encode_batch_text(texts, batch_size=1)
+        # Use batch encoding to process multiple items at once
+        # SiliconFlow has a 512 token limit, so we use moderate batch size
+        # Each text is already truncated to 300 chars (~400 tokens) to stay within limits
+        embeddings = EmbeddingServiceFactory.encode_batch_text(texts, batch_size=10)
 
         # Store embeddings
         success_count = 0

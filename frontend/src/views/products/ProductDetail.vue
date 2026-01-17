@@ -100,7 +100,7 @@ import { useProductStore } from '@/store'
 import { ElMessage } from 'element-plus'
 import { Edit, Connection, Plus } from '@element-plus/icons-vue'
 import type { Feature } from '@/types'
-import dayjs from 'dayjs'
+import { formatDate } from '@/utils/date'
 
 const route = useRoute()
 const router = useRouter()
@@ -149,10 +149,6 @@ async function loadFeatures() {
 
 function hasEmbedding(feature: Feature) {
   return (feature as any).has_embedding || false
-}
-
-function formatDate(date?: string) {
-  return date ? dayjs(date).format('YYYY-MM-DD HH:mm') : '-'
 }
 
 async function handleGenerateEmbedding(feature: Feature) {
