@@ -93,4 +93,19 @@ dump.rdb
 # Documentation - exclude JSON and Excel files in docs
 docs/*.json
 docs/*.xlsx
+
+# Backend media uploads (merged from main)
 backend/media/
+
+# Sensitive files with credentials (from mac_dev)
+backend/config/settings/supabase.py
+backend/test_supabase_connection.py
+backend/cookies.txt
+backend/test_supabase_vector.py
+backend/check_db_field_type.py
+backend/alter_to_vector.py
+backend/alter_vector_dimension.py
+
+# Temporary files
+nul
+frontend/nul
