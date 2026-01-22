@@ -23,6 +23,9 @@ from apps.embeddings.services import EmbeddingServiceFactory
 import time
 
 
+from utils.pagination import CustomPageNumberPagination
+
+
 class ProductViewSet(viewsets.ModelViewSet):
     """
     ViewSet for Product model.
@@ -37,6 +40,7 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     queryset = Product.objects.filter(is_active=True)
     serializer_class = ProductSerializer
+    pagination_class = CustomPageNumberPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['category', 'vendor', 'is_active']
     search_fields = ['name', 'description', 'vendor']

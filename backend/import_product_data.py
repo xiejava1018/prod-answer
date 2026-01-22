@@ -12,7 +12,7 @@ if sys.platform == 'win32':
     sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
     sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.supabase')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.development')
 django.setup()
 
 from apps.products.models import Product, Feature
@@ -35,8 +35,8 @@ def import_product_from_sheet(excel_file_path, sheet_name):
     - 序号 (Sequence Number)
     - 指标项 (Indicator Category)
     - 一级功能 (Level 1 Function)
-    - 二级功能 (Level 2 Function)
-    - 技术要求 (Technical Requirements)
+    - 指标名称 (Feature Name) -> 映射到 level2_function
+    - 指标要求 (Technical Requirements)
     """
 
     # Read sheet
@@ -57,16 +57,16 @@ def import_product_from_sheet(excel_file_path, sheet_name):
     product_description = f"{sheet_name}产品功能清单"
 
     # Determine product category based on name
-    if '资产' in sheet_name:
-        category = 'asset_management'
-    elif '漏洞' in sheet_name:
-        category = 'vulnerability_scanner'
-    elif '日志' in sheet_name or '审计' in sheet_name:
-        category = 'log_audit'
-    elif '威胁' in sheet_name:
-        category = 'threat_detection'
+    if '资产' in sheet_name or '攻击面' in sheet_name:
+        category = 'asset_mapping'
+    elif '暴露面' in sheet_name:
+        category = 'exposure_mapping'
+    elif '大数据' in sheet_name:
+        category = 'big_data'
+    elif 'SOAR' in sheet_name or '编排' in sheet_name:
+        category = 'soar'
     else:
-        category = 'security'
+        category = 'other'
 
     product = Product.objects.create(
         name=product_name,
@@ -81,22 +81,25 @@ def import_product_from_sheet(excel_file_path, sheet_name):
     # Initialize variables for hierarchical structure
     current_indicator = None
     current_level1 = None
-    current_level2 = None
+    current_feature_name = None
 
     success_count = 0
     error_count = 0
 
-    # Iterate through rows
+    # Iterate through rows - use column indices instead of names to avoid encoding issues
+    # Column mapping: 0=序号, 1=指标项, 2=一级功能, 3=指标名称, 4=指标要求
     for idx, row in df.iterrows():
         try:
-            sequence = row.get('序号', idx + 1)
-            indicator = row.get('指标项') if pd.notna(row.get('指标项')) else None
-            level1 = row.get('一级功能') if pd.notna(row.get('一级功能')) else None
-            level2 = row.get('二级功能') if pd.notna(row.get('二级功能')) else None
-            technical_req = row.get('技术要求', '')
+            # Get values by column index
+            row_values = row.tolist()
+            sequence = row_values[0] if len(row_values) > 0 else idx + 1
+            indicator = row_values[1] if len(row_values) > 1 and pd.notna(row_values[1]) else None
+            level1 = row_values[2] if len(row_values) > 2 and pd.notna(row_values[2]) else None
+            feature_name = row_values[3] if len(row_values) > 3 and pd.notna(row_values[3]) else None
+            technical_req = row_values[4] if len(row_values) > 4 else ''
 
             # Skip rows without any meaningful data
-            if pd.isna(sequence) and not indicator and not level1 and not level2 and not technical_req:
+            if pd.isna(sequence) and not indicator and not level1 and not feature_name and (not technical_req or pd.isna(technical_req)):
                 continue
 
             # Update current hierarchy levels
@@ -104,8 +107,8 @@ def import_product_from_sheet(excel_file_path, sheet_name):
                 current_indicator = indicator
             if level1:
                 current_level1 = level1
-            if level2:
-                current_level2 = level2
+            if feature_name:
+                current_feature_name = feature_name
 
             # Build feature name with hierarchy
             feature_parts = []
@@ -113,10 +116,10 @@ def import_product_from_sheet(excel_file_path, sheet_name):
                 feature_parts.append(current_indicator)
             if current_level1:
                 feature_parts.append(current_level1)
-            if current_level2:
-                feature_parts.append(current_level2)
+            if current_feature_name:
+                feature_parts.append(current_feature_name)
 
-            feature_name = ' > '.join(feature_parts) if feature_parts else f'功能 {sequence}'
+            feature_name_full = ' > '.join(feature_parts) if feature_parts else f'功能 {sequence}'
 
             # If still no technical requirement, skip this row
             if not technical_req or pd.isna(technical_req):
@@ -125,12 +128,12 @@ def import_product_from_sheet(excel_file_path, sheet_name):
             # Create feature
             feature = Feature.objects.create(
                 product=product,
-                feature_name=feature_name,
-                description=technical_req,
+                feature_name=feature_name_full,
+                description=str(technical_req),
                 category=current_indicator or '产品功能',
-                subcategory=current_level2 or '',
+                subcategory=current_feature_name or '',
                 level1_function=current_level1 or '',
-                level2_function=current_level2 or '',
+                level2_function=current_feature_name or '',
                 indicator_type=current_indicator or '产品功能',
                 is_active=True
             )
@@ -138,7 +141,7 @@ def import_product_from_sheet(excel_file_path, sheet_name):
             success_count += 1
 
             if success_count <= 3 or success_count % 10 == 0:
-                print(f"  [{success_count}] {feature_name[:60]}...")
+                print(f"  [{success_count}] {feature_name_full[:60]}...")
 
         except Exception as e:
             error_count += 1

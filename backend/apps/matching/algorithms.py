@@ -1,6 +1,7 @@
 """
 Matching algorithms for semantic similarity.
 """
+import os
 import numpy as np
 from typing import List, Dict, Tuple, Optional
 from django.conf import settings
@@ -8,11 +9,27 @@ from django.conf import settings
 # Conditional pgvector import
 try:
     from pgvector.django import CosineDistance
-    HAS_PGVECTOR = True
+    _HAS_PGVECTOR_LIB = True
 except ImportError:
-    HAS_PGVECTOR = False
+    _HAS_PGVECTOR_LIB = False
+    CosineDistance = None
 
 from apps.products.models import FeatureEmbedding, Feature
+
+
+def _check_pgvector_available() -> bool:
+    """Check if pgvector is available for the current database."""
+    if not _HAS_PGVECTOR_LIB:
+        return False
+    # Check if using SQLite
+    if os.environ.get('USE_SQLITE'):
+        return False
+    # Check database vendor at runtime
+    try:
+        from django.db import connection
+        return connection.vendor == 'postgresql'
+    except Exception:
+        return False
 
 
 class MatchingAlgorithm:
@@ -107,7 +124,7 @@ class MatchingAlgorithm:
             min_score = self.threshold
 
         try:
-            if HAS_PGVECTOR:
+            if _check_pgvector_available():
                 # Use pgvector for efficient similarity search
                 embeddings = FeatureEmbedding.objects.annotate(
                     similarity=1 - CosineDistance('embedding', query_embedding)

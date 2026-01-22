@@ -9,6 +9,11 @@ MIDDLEWARE += ['debug_toolbar.middleware.DebugToolbarMiddleware']
 
 INTERNAL_IPS = ['127.0.0.1', 'localhost']
 
+# Allow unauthenticated API access in development
+REST_FRAMEWORK['DEFAULT_PERMISSION_CLASSES'] = [
+    'rest_framework.permissions.AllowAny',
+]
+
 # Display emails in console
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 
