@@ -54,9 +54,21 @@ jobs:
             # Pull latest code
             echo "Pulling latest code..."
             cd "$DEPLOY_PATH"
+
+            # Backup production config before reset
+            if [ -f "backend/config/settings/production.py" ]; then
+              cp backend/config/settings/production.py /tmp/production.py.backup
+            fi
+
+            # Reset to latest main (handles local changes automatically)
             git fetch origin main
-            git checkout main
-            git pull origin main
+            git reset --hard origin/main
+
+            # Restore production config
+            if [ -f "/tmp/production.py.backup" ]; then
+              cp /tmp/production.py.backup backend/config/settings/production.py
+              echo "✓ Production config restored"
+            fi
 
             # Activate virtual environment
             echo "Activating virtual environment..."
