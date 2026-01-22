@@ -1,0 +1,140 @@
+name: Deploy to Production Server
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:  # Allow manual trigger
+    inputs:
+      skip_tests:
+        description: 'Skip tests (true/false)'
+        required: false
+        default: 'false'
+
+env:
+  DJANGO_SETTINGS_MODULE: config.settings.production
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to server via SSH
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script_stop: true  # Stop script on first error
+          script: |
+            set -e  # Exit on any error
+            set -x  # Print commands for debugging
+
+            DEPLOY_PATH="${{ secrets.DEPLOY_PATH }}"
+            BACKUP_DIR="${DEPLOY_PATH}/backups"
+            TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+
+            echo "=== Starting deployment at $(date) ==="
+
+            # Create backup directory
+            mkdir -p "$BACKUP_DIR"
+
+            # Backup database before migration
+            echo "Backing up database..."
+            cd "$DEPLOY_PATH/backend"
+            if [ -f "db.sqlite3" ]; then
+              cp db.sqlite3 "$BACKUP_DIR/db.sqlite3.$TIMESTAMP"
+              echo "Database backed up to: $BACKUP_DIR/db.sqlite3.$TIMESTAMP"
+            fi
+
+            # Pull latest code
+            echo "Pulling latest code..."
+            cd "$DEPLOY_PATH"
+            git fetch origin main
+            git checkout main
+            git pull origin main
+
+            # Activate virtual environment
+            echo "Activating virtual environment..."
+            source venv/bin/activate
+
+            # Install/update Python dependencies
+            echo "Installing Python dependencies..."
+            pip install --upgrade pip >/dev/null 2>&1 || true
+            pip install -r backend/requirements.txt --quiet
+
+            # Build frontend
+            echo "Building frontend..."
+            cd frontend
+            npm install --silent
+            npm run build
+            cd ..
+
+            # Run database migrations
+            echo "Running database migrations..."
+            cd backend
+            export DJANGO_SETTINGS_MODULE=config.settings.production
+            python manage.py migrate --noinput
+
+            # Collect static files
+            echo "Collecting static files..."
+            python manage.py collectstatic --noinput --clear
+
+            # Fix permissions
+            echo "Fixing file permissions..."
+            chown -R root:root "$DEPLOY_PATH"
+            find "$DEPLOY_PATH/backend" -name "*.pyc" -delete
+            find "$DEPLOY_PATH/backend" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+
+            # Restart Gunicorn service
+            echo "Restarting Gunicorn service..."
+            systemctl restart prod-answer
+            sleep 3
+
+            # Check service status
+            echo "Checking service status..."
+            if systemctl is-active --quiet prod-answer; then
+              echo "✓ Django service is running"
+            else
+              echo "✗ Django service failed to start!"
+              systemctl status prod-answer
+              exit 1
+            fi
+
+            # Health check
+            echo "Performing health check..."
+            HEALTH_CHECK=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/api/v1/products/ || echo "000")
+            if [ "$HEALTH_CHECK" = "200" ]; then
+              echo "✓ API health check passed (HTTP $HEALTH_CHECK)"
+            else
+              echo "✗ API health check failed (HTTP $HEALTH_CHECK)"
+              echo "Checking error logs..."
+              tail -20 logs/error.log
+              exit 1
+            fi
+
+            # Reload nginx
+            echo "Reloading nginx..."
+            systemctl reload nginx
+
+            # Cleanup old backups (keep last 7 days)
+            echo "Cleaning up old backups..."
+            find "$BACKUP_DIR" -name "db.sqlite3.*" -mtime +7 -delete 2>/dev/null || true
+
+            echo "=== Deployment completed successfully at $(date) ==="
+            echo "Database backup: $BACKUP_DIR/db.sqlite3.$TIMESTAMP"
+
+      - name: Deployment summary
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ Deployment successful!"
+            echo "🌐 Access the application at: http://${{ secrets.SSH_HOST }}:11080/"
+          else
+            echo "❌ Deployment failed!"
+            echo "Check the logs above for details."
+          fi
