@@ -96,6 +96,11 @@ jobs:
             # Build frontend
             echo "Building frontend..."
             cd frontend
+
+            # Configure npm to use Taobao mirror for faster downloads
+            echo "Configuring npm mirror..."
+            npm config set registry https://registry.npmmirror.com
+
             npm install --silent
             npm run build
             cd ..
