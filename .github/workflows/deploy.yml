@@ -237,6 +237,10 @@ jobs:
               exit 1
             fi
 
+            # Start nginx before health check
+            echo "Starting nginx..."
+            systemctl start nginx || systemctl reload nginx
+
             # Health check (accept 200 or 403, both indicate API is working)
             echo "Performing health check..."
             HEALTH_CHECK=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:11080/api/v1/products/ || echo "000")
@@ -248,10 +252,6 @@ jobs:
               tail -20 logs/error.log
               exit 1
             fi
-
-            # Reload nginx
-            echo "Reloading nginx..."
-            systemctl reload nginx || systemctl start nginx
 
             # Cleanup old backups (keep last 7 days)
             echo "Cleaning up old backups..."
