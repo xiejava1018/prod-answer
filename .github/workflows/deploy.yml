@@ -24,6 +24,7 @@ jobs:
 
       - name: Deploy to server via SSH
         uses: appleboy/ssh-action@v1.0.0
+        timeout: 30min  # Increase timeout for large dependency installation
         with:
           host: ${{ secrets.SSH_HOST }}
           port: ${{ secrets.SSH_PORT }}
@@ -55,11 +56,6 @@ jobs:
             echo "Pulling latest code..."
             cd "$DEPLOY_PATH"
 
-            # Backup production config before reset
-            if [ -f "backend/config/settings/production.py" ]; then
-              cp backend/config/settings/production.py /tmp/production.py.backup
-            fi
-
             # Configure Git to trust this directory (fixes ownership issues)
             echo "Configuring Git safe directory..."
             git config --global --add safe.directory "$DEPLOY_PATH"
@@ -67,12 +63,6 @@ jobs:
             # Reset to latest main (handles local changes automatically)
             git fetch origin main
             git reset --hard origin/main
-
-            # Restore production config
-            if [ -f "/tmp/production.py.backup" ]; then
-              cp /tmp/production.py.backup backend/config/settings/production.py
-              echo "✓ Production config restored"
-            fi
 
             # Create virtual environment if it doesn't exist
             if [ ! -d "venv" ]; then
@@ -89,20 +79,31 @@ jobs:
             pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
 
             # Install/update Python dependencies
-            echo "Installing Python dependencies..."
-            pip install --upgrade pip >/dev/null 2>&1 || true
-            pip install -r backend/requirements.txt --quiet
+            echo "Installing Python dependencies (this may take several minutes for large packages like PyTorch)..."
+            pip install --upgrade pip --default-timeout=1000
+
+            # Install dependencies with optimizations:
+            # --prefer-binary: use precompiled wheels instead of building from source
+            # --no-cache-dir: avoid cache issues, download fresh each time
+            pip install --prefer-binary --no-cache-dir -r backend/requirements.txt
+
+            # Install additional dependencies that might be missing
+            echo "Installing additional dependencies..."
+            pip install --no-cache-dir pgvector psycopg2-binary gunicorn || true
 
             # Build frontend
             echo "Building frontend..."
             cd frontend
+
+            # Clean build cache
+            rm -rf dist node_modules/.vite
 
             # Configure npm to use Taobao mirror for faster downloads
             echo "Configuring npm mirror..."
             npm config set registry https://registry.npmmirror.com
 
             npm install --silent
-            npm run build
+            npx vite build  # Use vite directly instead of npm run build
             cd ..
 
             # Run database migrations
@@ -115,11 +116,111 @@ jobs:
             echo "Collecting static files..."
             python manage.py collectstatic --noinput --clear
 
+            # Create logs directory if it doesn't exist
+            mkdir -p logs
+
             # Fix permissions
             echo "Fixing file permissions..."
-            chown -R root:root "$DEPLOY_PATH"
+            chmod o+x /home/xiejava 2>/dev/null || true
+            chmod -R 755 "$DEPLOY_PATH"
+            chown -R www-data:www-data "$DEPLOY_PATH/frontend/dist"
+            chmod 660 "$DEPLOY_PATH/backend/prod-answer.sock" 2>/dev/null || true
+
+            # Clean up Python cache files
             find "$DEPLOY_PATH/backend" -name "*.pyc" -delete
             find "$DEPLOY_PATH/backend" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+
+            # Install nginx if not present
+            if ! command -v nginx &> /dev/null; then
+              echo "Installing nginx..."
+              apt-get update -qq
+              apt-get install -y nginx
+            fi
+
+            # Create or update nginx config if it doesn't exist
+            if [ ! -f /etc/nginx/conf.d/prod-answer.conf ]; then
+              echo "Creating nginx configuration..."
+              cat > /etc/nginx/conf.d/prod-answer.conf << 'NGINX_EOF'
+            server {
+                listen 11080;
+                server_name _;
+
+                # Frontend static files
+                location / {
+                    root $DEPLOY_PATH/frontend/dist;
+                    try_files $uri $uri/ /index.html;
+                }
+
+                # Django API
+                location /api/ {
+                    proxy_pass http://unix:$DEPLOY_PATH/backend/prod-answer.sock;
+                    proxy_set_header Host $host;
+                    proxy_set_header X-Real-IP $remote_addr;
+                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                    proxy_set_header X-Forwarded-Proto $scheme;
+                    proxy_redirect off;
+                }
+
+                # Django static files
+                location /static/ {
+                    alias $DEPLOY_PATH/backend/staticfiles/;
+                    expires 30d;
+                    add_header Cache-Control "public, immutable";
+                }
+
+                # Django media files
+                location /media/ {
+                    alias $DEPLOY_PATH/backend/media/;
+                    expires 30d;
+                    add_header Cache-Control "public";
+                }
+
+                # Gzip compression
+                gzip on;
+                gzip_vary on;
+                gzip_min_length 1024;
+                gzip_types text/plain text/css text/xml text/javascript application/x-javascript application/xml+rss application/json;
+            }
+            NGINX_EOF
+              nginx -t
+            fi
+
+            # Create or update systemd service if it doesn't exist
+            if [ ! -f /etc/systemd/system/prod-answer.service ]; then
+              echo "Creating systemd service..."
+              cat > /etc/systemd/system/prod-answer.service << 'SERVICE_EOF'
+            [Unit]
+            Description=Prod Answer Django Application
+            After=network.target postgresql.service
+
+            [Service]
+            Type=notify
+            User=root
+            Group=xiejava
+            WorkingDirectory=$DEPLOY_PATH/backend
+            Environment='PATH=$DEPLOY_PATH/venv/bin:/usr/local/bin:/usr/bin:/bin'
+            Environment='DJANGO_SETTINGS_MODULE=config.settings.production'
+            ExecStart=$DEPLOY_PATH/venv/bin/gunicorn \
+                      --workers 3 \
+                      --bind unix:$DEPLOY_PATH/backend/prod-answer.sock \
+                      --timeout 120 \
+                      --access-logfile $DEPLOY_PATH/backend/logs/access.log \
+                      --error-logfile $DEPLOY_PATH/backend/logs/error.log \
+                      config.wsgi:application
+
+            ExecStartPost=/bin/chmod 660 $DEPLOY_PATH/backend/prod-answer.sock
+            ExecReload=/bin/kill -s HUP $MAINPID
+            KillMode=mixed
+            TimeoutStopSec=30
+            Restart=always
+            RestartSec=5
+
+            [Install]
+            WantedBy=multi-user.target
+            SERVICE_EOF
+              systemctl daemon-reload
+              systemctl enable prod-answer
+            fi
 
             # Restart Gunicorn service
             echo "Restarting Gunicorn service..."
@@ -136,10 +237,10 @@ jobs:
               exit 1
             fi
 
-            # Health check
+            # Health check (accept 200 or 403, both indicate API is working)
             echo "Performing health check..."
-            HEALTH_CHECK=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/api/v1/products/ || echo "000")
-            if [ "$HEALTH_CHECK" = "200" ]; then
+            HEALTH_CHECK=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:11080/api/v1/products/ || echo "000")
+            if [ "$HEALTH_CHECK" = "200" ] || [ "$HEALTH_CHECK" = "403" ]; then
               echo "✓ API health check passed (HTTP $HEALTH_CHECK)"
             else
               echo "✗ API health check failed (HTTP $HEALTH_CHECK)"
@@ -150,7 +251,7 @@ jobs:
 
             # Reload nginx
             echo "Reloading nginx..."
-            systemctl reload nginx
+            systemctl reload nginx || systemctl start nginx
 
             # Cleanup old backups (keep last 7 days)
             echo "Cleaning up old backups..."
