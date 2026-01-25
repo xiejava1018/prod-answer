@@ -84,6 +84,10 @@ jobs:
             echo "Activating virtual environment..."
             source venv/bin/activate
 
+            # Configure pip to use China mirror for faster downloads
+            echo "Configuring pip mirror..."
+            pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+
             # Install/update Python dependencies
             echo "Installing Python dependencies..."
             pip install --upgrade pip >/dev/null 2>&1 || true
