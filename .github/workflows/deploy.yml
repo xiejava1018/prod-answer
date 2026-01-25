@@ -1,4 +1,4 @@
-name: Deploy to Production Server
+name: 部署到服务器
 
 on:
   push:
@@ -17,6 +17,7 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 30  # Increase timeout for large dependency installation
 
     steps:
       - name: Checkout code
@@ -24,7 +25,6 @@ jobs:
 
       - name: Deploy to server via SSH
         uses: appleboy/ssh-action@v1.0.0
-        timeout: 30min  # Increase timeout for large dependency installation
         with:
           host: ${{ secrets.SSH_HOST }}
           port: ${{ secrets.SSH_PORT }}
