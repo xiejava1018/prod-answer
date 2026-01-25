@@ -60,6 +60,10 @@ jobs:
               cp backend/config/settings/production.py /tmp/production.py.backup
             fi
 
+            # Configure Git to trust this directory (fixes ownership issues)
+            echo "Configuring Git safe directory..."
+            git config --global --add safe.directory "$DEPLOY_PATH"
+
             # Reset to latest main (handles local changes automatically)
             git fetch origin main
             git reset --hard origin/main
