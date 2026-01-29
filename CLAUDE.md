@@ -267,6 +267,95 @@ Key variables in `.env`:
 - pgvector field becomes JSONField in SQLite mode
 - See products/models.py:11-15 for conditional VectorField import
 
+## Security & Git Best Practices
+
+### ⚠️ CRITICAL: Never Commit Sensitive Information
+
+**MANDATORY RULE:** Before pushing to GitHub, ALWAYS ensure no sensitive information is committed.
+
+**What MUST NEVER be committed:**
+- Database passwords and credentials (`DB_PASSWORD`, `DB_USER`)
+- API keys (`OPENAI_API_KEY`, `ZHIPUAI_API_KEY`, etc.)
+- Secret keys (`SECRET_KEY`, `ENCRYPTION_KEY`)
+- JWT tokens or session keys
+- Third-party service credentials
+- Production database URLs
+- Personal access tokens
+- Certificate files (`.pem`, `.crt`, `.key`)
+
+**Protected Files (.gitignore):**
+The following files are already in `.gitignore` and MUST remain there:
+```
+.env                    # Environment variables with secrets
+.env.local
+.env.*.local
+backend/media/          # User uploads may contain sensitive data
+*.db                    # Database files
+db.sqlite3
+```
+
+**Pre-commit Checklist:**
+Before ANY `git push`, run these checks:
+
+```bash
+# 1. Check what files will be pushed
+git status
+
+# 2. Review the diff for sensitive patterns
+git diff origin/main..HEAD | grep -i -E "(password|secret|api_key|token|credential)"
+
+# 3. Verify .env is not staged
+git ls-files | grep "\.env"
+
+# 4. Check for hardcoded secrets in Python files
+git diff origin/main..HEAD *.py | grep -i "password\s*=" | grep -v "#"
+```
+
+**If You Accidentally Committed Secrets:**
+
+1. **Immediate Actions:**
+   ```bash
+   # DO NOT push to GitHub
+   # Reset the commit
+   git reset --soft HEAD~1
+   # Remove sensitive files
+   git reset HEAD <sensitive-file>
+   # Commit again without sensitive data
+   git commit -m "Rewrite commit without sensitive data"
+   ```
+
+2. **If Already Pushed to GitHub:**
+   - Rotate ALL exposed credentials immediately
+   - Remove from Git history (force push with caution)
+   - Review GitHub's "Removing sensitive data from repository" guide
+   - Contact your security team if this is a production repository
+
+**Best Practices:**
+- ✅ Always use environment variables for secrets
+- ✅ Commit `.env.example` with placeholder values only
+- ✅ Use encryption for API keys at rest (Fernet)
+- ✅ Mask sensitive data in API responses (show only last 4 chars)
+- ✅ Run security checks before pushing
+- ✅ Use `git-secrets` or similar tools if available
+
+**Example .env.example (safe to commit):**
+```bash
+# Database
+DB_NAME=prod_answer
+DB_USER=your_username
+DB_PASSWORD=your_password_here
+DB_HOST=localhost
+DB_PORT=5432
+
+# API Keys
+OPENAI_API_KEY=sk-your-key-here
+ENCRYPTION_KEY=your-fernet-key-here
+
+# Django
+SECRET_KEY=your-secret-key-here
+DEBUG=True
+```
+
 ## Important Notes
 
 - **pgvector Required:** System requires PostgreSQL with pgvector extension for production
