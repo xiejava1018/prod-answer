@@ -113,11 +113,51 @@ class MatchRecord(TimeStampedModel):
     rank = models.IntegerField()
     metadata = models.JSONField(default=dict, blank=True)
 
+    # LLM enhancement fields (Task 1.2)
+    llm_analysis = models.ForeignKey(
+        'llm.LLMAnalysisResult',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='match_records',
+        help_text="Link to LLM analysis if available"
+    )
+    final_confidence = models.FloatField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Final confidence score after LLM correction (0.0-1.0)"
+    )
+    is_llm_corrected = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text="Whether the match status was corrected by LLM analysis"
+    )
+
     class Meta:
         db_table = 'match_records'
         verbose_name = 'Match Record'
         verbose_name_plural = 'Match Records'
         ordering = ['-similarity_score']
+        indexes = [
+            models.Index(fields=['is_llm_corrected']),
+            models.Index(fields=['final_confidence']),
+        ]
 
     def __str__(self):
         return f"Match: {self.requirement_item.item_text[:30]} -> {self.feature.feature_name} ({self.similarity_score:.2f})"
+
+    @property
+    def has_llm_analysis(self):
+        """Check if this match record has associated LLM analysis."""
+        return self.llm_analysis is not None
+
+    @property
+    def original_match_status(self):
+        """Get the original match status before LLM correction."""
+        # If this was never corrected, return current status
+        if not self.is_llm_corrected:
+            return self.match_status
+        # Otherwise, we'd need to store this separately
+        # For now, return None to indicate we don't have this info
+        return None

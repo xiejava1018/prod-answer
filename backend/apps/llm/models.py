@@ -165,12 +165,163 @@ class LLMModelConfig(TimeStampedModel):
             self.api_key_encrypted = api_key
 
 
-# TODO (Task 1.2): Add the following features:
-# - More provider choices (Anthropic, Google Gemini, etc.)
-# - Rate limiting configuration
-# - Budget/cost tracking fields
-# - Usage statistics tracking
-# - API version selection
-# - Custom prompt templates per model
-# - Admin interface customization
-# - Migration to create database table
+class LLMAnalysisResult(TimeStampedModel):
+    """
+    LLM analysis result for requirement-feature matching.
+
+    Stores detailed analysis from LLM about whether a requirement
+    item matches a feature, including reasoning and confidence scores.
+    """
+
+    requirement_item = models.ForeignKey(
+        'matching.RequirementItem',
+        on_delete=models.CASCADE,
+        related_name='llm_analyses',
+        db_index=True,
+        help_text="The requirement item being analyzed"
+    )
+    feature = models.ForeignKey(
+        'products.Feature',
+        on_delete=models.CASCADE,
+        related_name='llm_analyses',
+        db_index=True,
+        help_text="The feature being compared"
+    )
+    match_reason = models.TextField(
+        blank=True,
+        help_text="LLM's reasoning for the match decision"
+    )
+    keywords_from_requirement = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Key phrases extracted from requirement"
+    )
+    keywords_from_feature = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Key phrases extracted from feature"
+    )
+    is_valid_match = models.BooleanField(
+        null=True,
+        help_text="LLM's judgment on whether this is a valid match"
+    )
+    confidence_score = models.FloatField(
+        null=True,
+        help_text="LLM's confidence score (0.0-1.0)"
+    )
+    llm_provider = models.CharField(
+        max_length=50,
+        help_text="Provider used for analysis (e.g., 'openai', 'zhipuai')"
+    )
+    llm_model = models.CharField(
+        max_length=100,
+        help_text="Model used for analysis (e.g., 'gpt-4o-mini')"
+    )
+    prompt_tokens = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Number of tokens in the prompt"
+    )
+    completion_tokens = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Number of tokens in the completion"
+    )
+    total_tokens = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Total tokens used (prompt + completion)"
+    )
+    analysis_metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Additional metadata from the analysis"
+    )
+
+    class Meta:
+        db_table = 'llm_analysis_results'
+        verbose_name = 'LLM Analysis Result'
+        verbose_name_plural = 'LLM Analysis Results'
+        ordering = ['-created_at']
+        unique_together = ['requirement_item', 'feature']
+        indexes = [
+            models.Index(fields=['requirement_item', 'feature']),
+            models.Index(fields=['llm_provider', 'llm_model']),
+            models.Index(fields=['is_valid_match']),
+            models.Index(fields=['confidence_score']),
+        ]
+
+    def __str__(self):
+        return f"LLM Analysis: {self.requirement_item.item_text[:30]} -> {self.feature.feature_name}"
+
+    def save(self, *args, **kwargs):
+        # Calculate total tokens if not provided
+        if self.prompt_tokens and self.completion_tokens and not self.total_tokens:
+            self.total_tokens = self.prompt_tokens + self.completion_tokens
+        super().save(*args, **kwargs)
+
+
+class LLMCache(TimeStampedModel):
+    """
+    Cache for LLM responses to avoid redundant API calls.
+
+    Uses a hash of the input text and feature IDs as the cache key.
+    Supports automatic expiration and hit counting.
+    """
+
+    cache_key = models.CharField(
+        max_length=64,
+        unique=True,
+        db_index=True,
+        help_text="SHA-256 hash of the input parameters"
+    )
+    requirement_text = models.TextField(
+        help_text="The requirement text that was analyzed"
+    )
+    feature_ids = models.JSONField(
+        help_text="List of feature IDs that were analyzed"
+    )
+    response_json = models.JSONField(
+        help_text="Cached LLM response"
+    )
+    hit_count = models.IntegerField(
+        default=0,
+        help_text="Number of times this cache entry has been used"
+    )
+    expires_at = models.DateTimeField(
+        db_index=True,
+        help_text="When this cache entry should expire"
+    )
+    llm_provider = models.CharField(
+        max_length=50,
+        help_text="Provider that generated this response"
+    )
+    llm_model = models.CharField(
+        max_length=100,
+        help_text="Model that generated this response"
+    )
+
+    class Meta:
+        db_table = 'llm_cache'
+        verbose_name = 'LLM Cache'
+        verbose_name_plural = 'LLM Cache'
+        ordering = ['-hit_count', '-created_at']
+        indexes = [
+            models.Index(fields=['cache_key']),
+            models.Index(fields=['expires_at']),
+            models.Index(fields=['llm_provider', 'llm_model']),
+        ]
+
+    def __str__(self):
+        return f"Cache: {self.cache_key[:16]}... ({self.hit_count} hits)"
+
+    @classmethod
+    def is_expired(cls, cache_entry):
+        """Check if a cache entry has expired."""
+        from django.utils import timezone
+        return cache_entry.expires_at < timezone.now()
+
+    def increment_hit_count(self):
+        """Increment the hit count for this cache entry."""
+        self.hit_count += 1
+        self.save(update_fields=['hit_count'])
