@@ -2,6 +2,7 @@
 Matching models.
 """
 from django.db import models
+from django.core.validators import MinValueValidator, MaxValueValidator
 from apps.core.models import TimeStampedModel
 from apps.products.models import Feature
 
@@ -122,9 +123,16 @@ class MatchRecord(TimeStampedModel):
         related_name='match_records',
         help_text="Link to LLM analysis if available"
     )
+    original_match_status = models.CharField(
+        max_length=20,
+        choices=MATCH_STATUS_CHOICES,
+        blank=True,
+        help_text="Match status before LLM correction"
+    )
     final_confidence = models.FloatField(
         null=True,
         blank=True,
+        validators=[MinValueValidator(0.0), MaxValueValidator(1.0)],
         db_index=True,
         help_text="Final confidence score after LLM correction (0.0-1.0)"
     )
@@ -153,11 +161,6 @@ class MatchRecord(TimeStampedModel):
         return self.llm_analysis is not None
 
     @property
-    def original_match_status(self):
+    def original_match_status_display(self):
         """Get the original match status before LLM correction."""
-        # If this was never corrected, return current status
-        if not self.is_llm_corrected:
-            return self.match_status
-        # Otherwise, we'd need to store this separately
-        # For now, return None to indicate we don't have this info
-        return None
+        return self.original_match_status or self.match_status

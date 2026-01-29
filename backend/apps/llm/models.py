@@ -6,6 +6,7 @@ Currently provides minimal structure to prevent ImportError in services.py
 """
 from django.db import models
 from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator, MaxValueValidator
 from apps.core.models import TimeStampedModel
 import os
 from cryptography.fernet import Fernet
@@ -203,10 +204,13 @@ class LLMAnalysisResult(TimeStampedModel):
     )
     is_valid_match = models.BooleanField(
         null=True,
-        help_text="LLM's judgment on whether this is a valid match"
+        blank=True,
+        help_text="LLM judgment: True=valid, False=invalid, Null=not analyzed or inconclusive"
     )
     confidence_score = models.FloatField(
         null=True,
+        blank=True,
+        validators=[MinValueValidator(0.0), MaxValueValidator(1.0)],
         help_text="LLM's confidence score (0.0-1.0)"
     )
     llm_provider = models.CharField(
