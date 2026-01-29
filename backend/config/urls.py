@@ -13,6 +13,7 @@ urlpatterns = [
     path('api/v1/', include('apps.matching.urls')),
     path('api/v1/', include('apps.requirements.urls')),
     path('api/v1/', include('apps.reports.urls')),
+    path('api/v1/', include('apps.llm.urls')),
 ]
 
 # Add debug toolbar URLs if installed
