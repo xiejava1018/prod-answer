@@ -5,7 +5,7 @@ import time
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, IsAdminUser
+from rest_framework.permissions import AllowAny
 
 from .models import LLMModelConfig, LLMAnalysisResult
 from .serializers import (
@@ -20,12 +20,14 @@ class LLMConfigViewSet(viewsets.ModelViewSet):
     """
     ViewSet for LLMModelConfig management.
 
-    list: List all LLM model configurations (authenticated users)
-    retrieve: Get configuration details (authenticated users)
-    create: Create a new configuration (admin only)
-    update: Update a configuration (admin only)
-    partial_update: Partially update a configuration (admin only)
-    destroy: Delete a configuration (admin only)
+    DEVELOPMENT MODE: No authentication required for easier testing
+
+    list: List all LLM model configurations
+    retrieve: Get configuration details
+    create: Create a new configuration
+    update: Update a configuration
+    partial_update: Partially update a configuration
+    destroy: Delete a configuration
     """
 
     queryset = LLMModelConfig.objects.all()
@@ -34,13 +36,14 @@ class LLMConfigViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         """
         Set permissions based on action.
-        - Read operations: Any authenticated user
-        - Write operations: Admin only
+        DEVELOPMENT MODE: Allow all actions without authentication
         """
-        if self.action in ['list', 'retrieve', 'test']:
-            permission_classes = [IsAuthenticated]
-        else:
-            permission_classes = [IsAdminUser]
+        # TODO: Restore authentication for production
+        # if self.action in ['list', 'retrieve', 'test']:
+        #     permission_classes = [IsAuthenticated]
+        # else:
+        #     permission_classes = [IsAdminUser]
+        permission_classes = [AllowAny]
         return [permission() for permission in permission_classes]
 
     def get_queryset(self):
@@ -192,13 +195,15 @@ class LLMAnalysisResultViewSet(viewsets.ReadOnlyModelViewSet):
     """
     ViewSet for LLMAnalysisResult (read-only).
 
+    DEVELOPMENT MODE: No authentication required for easier testing
+
     list: List all LLM analysis results
     retrieve: Get analysis result details
     """
 
     queryset = LLMAnalysisResult.objects.all()
     serializer_class = LLMAnalysisResultSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]  # TODO: Restore IsAuthenticated for production
 
     def get_queryset(self):
         """Filter queryset based on query parameters."""
