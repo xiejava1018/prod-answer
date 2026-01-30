@@ -1,7 +1,16 @@
 /**
  * LLM Configuration Management API
  */
-import request from './index'
+import { get, post, put, patch, del as requestDelete } from '@/utils/request'
+
+// Create a simple axios-like interface for consistency
+const request = {
+  get: <T = any>(url: string, config?: any) => get<T>(url, config?.params),
+  post: <T = any>(url: string, data?: any, config?: any) => post<T>(url, data),
+  put: <T = any>(url: string, data?: any) => put<T>(url, data),
+  patch: <T = any>(url: string, data?: any) => patch<T>(url, data),
+  delete: <T = any>(url: string) => requestDelete<T>(url)
+}
 
 export interface LLMModelConfig {
   id: string

@@ -82,6 +82,10 @@ export function del<T = any>(url: string, params?: any): Promise<T> {
   return service.delete<T>(url, { params })
 }
 
+export function patch<T = any>(url: string, data?: any): Promise<T> {
+  return service.patch<T>(url, data)
+}
+
 export function upload<T = any>(url: string, formData: FormData): Promise<T> {
   return service.post<T>(url, formData, {
     headers: {
