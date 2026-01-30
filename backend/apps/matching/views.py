@@ -5,6 +5,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.utils import timezone
+import logging
 
 from .models import CapabilityRequirement, RequirementItem, MatchRecord
 from .serializers import (
@@ -17,8 +18,10 @@ from .serializers import (
     MatchResultDetailSerializer,
     MatchSummarySerializer,
 )
-from .services import MatchingService
+from .services import MatchingService, EnhancedMatchingService
 import time
+
+logger = logging.getLogger(__name__)
 
 
 class MatchingViewSet(viewsets.ViewSet):
@@ -33,10 +36,18 @@ class MatchingViewSet(viewsets.ViewSet):
 
     def create(self, request):
         """
-        Perform matching analysis.
+        Perform matching analysis with optional LLM enhancement.
 
         POST /api/v1/matching/analyze
-        Body: { requirement_id, threshold?, product_ids?, limit? }
+        Body: {
+            requirement_id,
+            threshold?,
+            product_ids?,
+            limit?,
+            enable_llm_analysis?,
+            llm_config_id?,
+            llm_analysis_mode?
+        }
         """
         serializer = MatchAnalyzeSerializer(data=request.data)
 
@@ -45,31 +56,42 @@ class MatchingViewSet(viewsets.ViewSet):
 
         requirement_id = serializer.validated_data['requirement_id']
         threshold = serializer.validated_data['threshold']
-        product_ids = serializer.validated_data.get('product_ids')
-        limit = serializer.validated_data['limit']
+        enable_llm_analysis = serializer.validated_data.get('enable_llm_analysis', False)
+        llm_config_id = serializer.validated_data.get('llm_config_id')
+        llm_analysis_mode = serializer.validated_data.get('llm_analysis_mode', 'full')
 
         try:
-            # Get requirement
-            requirement = CapabilityRequirement.objects.get(id=requirement_id)
+            # Choose service based on LLM analysis flag
+            if enable_llm_analysis:
+                service = EnhancedMatchingService(
+                    threshold=threshold,
+                    llm_config_id=llm_config_id
+                )
+                logger.info(f"Using enhanced matching with LLM config: {llm_config_id}")
+            else:
+                service = MatchingService(threshold=threshold)
 
-            # Perform matching
-            service = MatchingService(threshold=threshold)
             start_time = time.time()
 
-            result = service.process_requirement(
-                requirement_id=str(requirement_id),
-                generate_embeddings=True
-            )
+            # Perform matching
+            if enable_llm_analysis:
+                result = service.process_requirement_with_llm(
+                    requirement_id=str(requirement_id),
+                    llm_config_id=llm_config_id,
+                    analysis_mode=llm_analysis_mode,
+                    generate_embeddings=True
+                )
+            else:
+                result = service.process_requirement(
+                    requirement_id=str(requirement_id),
+                    generate_embeddings=True
+                )
 
             processing_time = time.time() - start_time
-
             result['processing_time'] = round(processing_time, 2)
 
-            # Wrap result in summary for frontend compatibility
-            return Response({
-                'summary': result,
-                'processing_time': result['processing_time']
-            }, status=status.HTTP_200_OK)
+            # Wrap result for frontend compatibility
+            return Response(result, status=status.HTTP_200_OK)
 
         except CapabilityRequirement.DoesNotExist:
             return Response({
@@ -77,6 +99,7 @@ class MatchingViewSet(viewsets.ViewSet):
             }, status=status.HTTP_404_NOT_FOUND)
 
         except Exception as e:
+            logger.error(f"Matching analysis failed: {e}", exc_info=True)
             return Response({
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -123,6 +146,162 @@ class MatchingViewSet(viewsets.ViewSet):
             return Response({
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['post'], url_path='analyze-enhanced')
+    def analyze_enhanced(self, request):
+        """
+        Perform enhanced matching analysis with LLM (always enabled).
+
+        POST /api/v1/matching/analyze-enhanced/
+        Body: {
+            requirement_id,
+            threshold?,
+            llm_config_id?,
+            llm_analysis_mode?
+        }
+        """
+        serializer = MatchAnalyzeSerializer(data=request.data)
+
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        requirement_id = serializer.validated_data['requirement_id']
+        threshold = serializer.validated_data['threshold']
+        llm_config_id = serializer.validated_data.get('llm_config_id')
+        llm_analysis_mode = serializer.validated_data.get('llm_analysis_mode', 'full')
+
+        try:
+            # Use EnhancedMatchingService (LLM always enabled)
+            service = EnhancedMatchingService(
+                threshold=threshold,
+                llm_config_id=llm_config_id
+            )
+
+            start_time = time.time()
+
+            result = service.process_requirement_with_llm(
+                requirement_id=str(requirement_id),
+                llm_config_id=llm_config_id,
+                analysis_mode=llm_analysis_mode,
+                generate_embeddings=True
+            )
+
+            processing_time = time.time() - start_time
+            result['processing_time'] = round(processing_time, 2)
+
+            return Response(result, status=status.HTTP_200_OK)
+
+        except CapabilityRequirement.DoesNotExist:
+            return Response({
+                'error': 'Requirement not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        except Exception as e:
+            logger.error(f"Enhanced matching analysis failed: {e}", exc_info=True)
+            return Response({
+                'error': str(e),
+                'llm_analysis_failed': True
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['post'], url_path='batch-analyze-enhanced')
+    def batch_analyze_enhanced(self, request):
+        """
+        Batch analyze multiple requirements with LLM enhancement.
+
+        POST /api/v1/matching/batch-analyze-enhanced/
+        Body: {
+            requirement_ids: ["uuid1", "uuid2", ...],
+            threshold?,
+            llm_config_id?,
+            async: true
+        }
+        """
+        requirement_ids = request.data.get('requirement_ids', [])
+        threshold = request.data.get('threshold', 0.75)
+        llm_config_id = request.data.get('llm_config_id')
+        async_mode = request.data.get('async', True)
+
+        if not requirement_ids:
+            return Response({
+                'error': 'requirement_ids is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Validate all requirements exist
+        from django.shortcuts import get_object_or_404
+        for req_id in requirement_ids:
+            if not CapabilityRequirement.objects.filter(id=req_id).exists():
+                return Response({
+                    'error': f'Requirement {req_id} not found'
+                }, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            if async_mode:
+                # Return task_id for async processing
+                # TODO: Implement Celery task in Phase 2
+                return Response({
+                    'message': 'Async batch processing will be implemented with Celery',
+                    'requirement_ids': requirement_ids,
+                    'count': len(requirement_ids)
+                }, status=status.HTTP_501_NOT_IMPLEMENTED)
+            else:
+                # Synchronous batch processing
+                results = []
+                service = EnhancedMatchingService(
+                    threshold=threshold,
+                    llm_config_id=llm_config_id
+                )
+
+                total_start = time.time()
+                for req_id in requirement_ids:
+                    try:
+                        result = service.process_requirement_with_llm(
+                            requirement_id=str(req_id),
+                            llm_config_id=llm_config_id,
+                            analysis_mode='full',
+                            generate_embeddings=True
+                        )
+                        results.append({
+                            'requirement_id': str(req_id),
+                            'status': 'success',
+                            'result': result
+                        })
+                    except Exception as e:
+                        logger.error(f"Failed to process requirement {req_id}: {e}")
+                        results.append({
+                            'requirement_id': str(req_id),
+                            'status': 'failed',
+                            'error': str(e)
+                        })
+
+                total_time = time.time() - total_start
+
+                return Response({
+                    'total_requirements': len(requirement_ids),
+                    'successful': len([r for r in results if r['status'] == 'success']),
+                    'failed': len([r for r in results if r['status'] == 'failed']),
+                    'total_time': round(total_time, 2),
+                    'results': results
+                }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            logger.error(f"Batch analysis failed: {e}", exc_info=True)
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['get'], url_path='batch-status/(?P<task_id>[^/.]+)')
+    def batch_status(self, request, task_id=None):
+        """
+        Get batch processing status.
+
+        GET /api/v1/matching/batch-status/{task_id}/
+
+        TODO: Implement with Celery in Phase 2
+        """
+        return Response({
+            'message': 'Batch status tracking will be implemented with Celery',
+            'task_id': task_id
+        }, status=status.HTTP_501_NOT_IMPLEMENTED)
 
     @action(detail=False, methods=['post'], url_path='export/(?P<requirement_id>[^/.]+)')
     def export(self, request, requirement_id=None):

@@ -166,13 +166,16 @@ class MatchRecordAdmin(admin.ModelAdmin):
         """Display product name."""
         return obj.feature.product.name
 
+    @admin.display(
+        description='LLM分析',
+        ordering='has_llm_analysis'
+    )
     def has_llm_analysis_badge(self, obj):
         """Display whether record has LLM analysis."""
-        from django.utils.html import format_html
+        from django.utils.safestring import mark_safe
         if obj.has_llm_analysis:
-            return format_html('<span style="color: green;">✓ 是</span>')
-        return format_html('<span style="color: red;">✗ 否</span>')
-    has_llm_analysis_badge.short_description = 'LLM分析'
+            return mark_safe('<span style="color: green;">✓ 是</span>')
+        return mark_safe('<span style="color: red;">✗ 否</span>')
 
     def final_confidence_display(self, obj):
         """Display final confidence score."""

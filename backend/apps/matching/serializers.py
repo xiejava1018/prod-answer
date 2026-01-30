@@ -74,13 +74,18 @@ class CapabilityRequirementCreateSerializer(serializers.Serializer):
 
 
 class MatchRecordSerializer(serializers.ModelSerializer):
-    """Serializer for MatchRecord model."""
+    """Serializer for MatchRecord model with LLM analysis support."""
 
     match_status_display = serializers.CharField(source='get_match_status_display', read_only=True)
     requirement_item_text = serializers.CharField(source='requirement_item.item_text', read_only=True)
     feature_name = serializers.CharField(source='feature.feature_name', read_only=True)
     feature_description = serializers.CharField(source='feature.description', read_only=True)
     product_name = serializers.CharField(source='feature.product.name', read_only=True)
+
+    # LLM analysis fields
+    llm_analysis = serializers.SerializerMethodField()
+    final_confidence = serializers.FloatField(read_only=True)
+    is_llm_corrected = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = MatchRecord
@@ -99,13 +104,23 @@ class MatchRecordSerializer(serializers.ModelSerializer):
             'threshold_used',
             'rank',
             'metadata',
+            'llm_analysis',
+            'final_confidence',
+            'is_llm_corrected',
             'created_at',
         ]
-        read_only_fields = ['id', 'created_at']
+        read_only_fields = ['id', 'created_at', 'final_confidence', 'is_llm_corrected']
+
+    def get_llm_analysis(self, obj):
+        """Get LLM analysis if available."""
+        if hasattr(obj, 'llm_analysis') and obj.llm_analysis:
+            from apps.llm.serializers import LLMAnalysisResultSerializer
+            return LLMAnalysisResultSerializer(obj.llm_analysis).data
+        return None
 
 
 class MatchAnalyzeSerializer(serializers.Serializer):
-    """Serializer for match analysis request."""
+    """Serializer for match analysis request with LLM support."""
 
     requirement_id = serializers.UUIDField()
     threshold = serializers.FloatField(default=0.75, min_value=0.0, max_value=1.0)
@@ -116,11 +131,42 @@ class MatchAnalyzeSerializer(serializers.Serializer):
     )
     limit = serializers.IntegerField(default=5, min_value=1, max_value=20)
 
+    # LLM analysis parameters
+    enable_llm_analysis = serializers.BooleanField(default=False)
+    llm_config_id = serializers.UUIDField(required=False, allow_null=True)
+    llm_analysis_mode = serializers.ChoiceField(
+        choices=['full', 'quick'],
+        default='full'
+    )
+
     def validate_requirement_id(self, value):
         """Validate that requirement exists."""
         if not CapabilityRequirement.objects.filter(id=value).exists():
             raise serializers.ValidationError("Requirement not found.")
         return value
+
+    def validate(self, attrs):
+        """Validate LLM configuration."""
+        if attrs.get('enable_llm_analysis'):
+            llm_config_id = attrs.get('llm_config_id')
+            if not llm_config_id:
+                # If no config specified, try to use default
+                from apps.llm.models import LLMModelConfig
+                default_config = LLMModelConfig.objects.filter(
+                    is_default=True,
+                    is_active=True
+                ).first()
+                if not default_config:
+                    default_config = LLMModelConfig.objects.filter(
+                        is_active=True
+                    ).first()
+
+                if not default_config:
+                    raise serializers.ValidationError(
+                        "No active LLM configuration found. Please configure an LLM model first."
+                    )
+                attrs['llm_config_id'] = str(default_config.id)
+        return attrs
 
 
 class MatchResultSerializer(serializers.Serializer):

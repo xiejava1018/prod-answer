@@ -67,6 +67,18 @@ const routes: RouteRecordRaw[] = [
     name: 'EmbeddingSettings',
     component: () => import('@/views/settings/EmbeddingSettings.vue'),
     meta: { title: 'Embedding配置' }
+  },
+  {
+    path: '/settings/llm',
+    name: 'LLMConfig',
+    component: () => import('@/views/settings/LLMConfig.vue'),
+    meta: { title: 'LLM配置' }
+  },
+  {
+    path: '/settings/costs',
+    name: 'CostMonitoring',
+    component: () => import('@/views/settings/CostMonitoring.vue'),
+    meta: { title: '成本监控' }
   }
 ]
 
