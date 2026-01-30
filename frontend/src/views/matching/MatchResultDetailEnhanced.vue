@@ -131,7 +131,7 @@
           <el-table-column type="index" label="#" width="60" />
           <el-table-column prop="requirement_item_text" label="需求规格" min-width="300">
             <template #default="{ row }">
-              <div class="requirement-text">
+              <div class="requirement-text-with-highlight">
                 <span v-html="highlightKeywords(row.requirement_item_text, row.matches?.[0]?.llm_analysis?.keywords_from_requirement)"></span>
               </div>
             </template>
@@ -155,12 +155,11 @@
           <el-table-column label="规格满足度详细描述" min-width="500">
             <template #default="{ row }">
               <div v-if="row.matches && row.matches.length > 0" class="satisfaction-detail">
-                <!-- 显示所有匹配的功能，按相似度排序 -->
+                <!-- 只显示排名第一的最佳匹配 -->
                 <div
-                  v-for="(match, index) in row.matches"
+                  v-for="(match, index) in row.matches.slice(0, 1)"
                   :key="index"
-                  class="match-item-enhanced"
-                  :class="{ 'is-best': index === 0 }"
+                  class="match-item-enhanced is-best"
                 >
                   <!-- Header: Status badges and confidence -->
                   <div class="detail-header">

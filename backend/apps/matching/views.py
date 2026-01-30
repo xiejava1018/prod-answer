@@ -319,11 +319,45 @@ class MatchingViewSet(viewsets.ViewSet):
         POST /api/v1/matching/export/{requirement_id}/
         Body: { format: 'excel'|'pdf', include_unmatched: true }
         """
-        # TODO: Implement export functionality
-        return Response({
-            'message': 'Export functionality will be implemented',
-            'requirement_id': requirement_id
-        }, status=status.HTTP_501_NOT_IMPLEMENTED)
+        try:
+            # Get export parameters
+            export_format = request.data.get('format', 'excel')
+            include_unmatched = request.data.get('include_unmatched', False)
+
+            # Validate format
+            if export_format not in ['excel', 'pdf']:
+                return Response({
+                    'error': 'Unsupported format. Use excel or pdf'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Export results
+            service = MatchingService()
+            file_content = service.export_results(
+                requirement_id=requirement_id,
+                format=export_format,
+                include_unmatched=include_unmatched
+            )
+
+            # Set appropriate content type and headers
+            if export_format == 'excel':
+                content_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                filename = f'match_results_{requirement_id}.xlsx'
+            elif export_format == 'pdf':
+                content_type = 'application/pdf'
+                filename = f'match_results_{requirement_id}.pdf'
+
+            # Return file response
+            from django.http import HttpResponse
+            response = HttpResponse(file_content, content_type=content_type)
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+            return response
+
+        except Exception as e:
+            logger.error(f"Export failed: {e}", exc_info=True)
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @method_decorator(csrf_exempt, name='dispatch')

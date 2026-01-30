@@ -266,6 +266,107 @@ class MatchingService:
 
         return stats
 
+    def export_results(self, requirement_id: str, format: str = 'excel', include_unmatched: bool = False) -> bytes:
+        """
+        Export match results to Excel or PDF format.
+
+        Args:
+            requirement_id: UUID of the requirement
+            format: 'excel' or 'pdf'
+            include_unmatched: Whether to include unmatched items
+
+        Returns:
+            Bytes of the exported file
+        """
+        import pandas as pd
+        from io import BytesIO
+
+        # Get match results
+        matches = MatchRecord.objects.filter(
+            requirement_id=requirement_id
+        ).select_related(
+            'requirement_item__requirement',
+            'feature__product'
+        ).order_by('-similarity_score')
+
+        # Create DataFrame
+        data = []
+        for match in matches:
+            data.append({
+                '需求项': match.requirement_item.item_text,
+                '功能名称': match.feature.feature_name,
+                '功能描述': match.feature.description,
+                '产品名称': match.feature.product.name,
+                '相似度': match.similarity_score,
+                '匹配状态': match.match_status,
+                '排名': match.rank,
+            })
+
+        # Add unmatched items if requested
+        if include_unmatched:
+            from .models import RequirementItem
+            matched_item_ids = [match.requirement_item.id for match in matches]
+            unmatched_items = RequirementItem.objects.filter(
+                requirement_id=requirement_id
+            ).exclude(id__in=matched_item_ids)
+
+            for item in unmatched_items:
+                data.append({
+                    '需求项': item.item_text,
+                    '功能名称': '',
+                    '功能描述': '',
+                    '产品名称': '',
+                    '相似度': 0,
+                    '匹配状态': 'unmatched',
+                    '排名': '',
+                })
+
+        df = pd.DataFrame(data)
+
+        # Export to Excel or PDF
+        output = BytesIO()
+
+        if format == 'excel':
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df.to_excel(writer, sheet_name='匹配结果', index=False)
+            output.seek(0)
+            return output.getvalue()
+        elif format == 'pdf':
+            from reportlab.lib.pagesizes import letter
+            from reportlab.lib.styles import getSampleStyleSheet
+            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
+            from reportlab.lib import colors
+
+            doc = SimpleDocTemplate(output, pagesize=letter)
+            elements = []
+            styles = getSampleStyleSheet()
+
+            # Add title
+            title = Paragraph("产品能力匹配结果", styles['Title'])
+            elements.append(title)
+
+            # Add table
+            table_data = [df.columns.tolist()] + df.values.tolist()
+            table = Table(table_data)
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 0), (-1, 0), 12),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('TOPPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ]))
+            elements.append(table)
+
+            doc.build(elements)
+            output.seek(0)
+            return output.getvalue()
+        else:
+            raise ValueError("Unsupported format: {}".format(format))
+
 
 class EnhancedMatchingService(MatchingService):
     """

@@ -83,7 +83,13 @@
 
         <el-table :data="filteredResults" border stripe>
           <el-table-column type="index" label="#" width="60" />
-          <el-table-column prop="requirement_item_text" label="需求规格" min-width="300" />
+          <el-table-column prop="requirement_item_text" label="需求规格" min-width="300">
+            <template #default="{ row }">
+              <div class="requirement-text-with-highlight">
+                <span v-html="highlightKeywords(row.requirement_item_text, row.matches?.[0]?.keywords_from_requirement)"></span>
+              </div>
+            </template>
+          </el-table-column>
           <el-table-column label="需求规格满足度" width="150" align="center">
             <template #default="{ row }">
               <el-tag
@@ -97,12 +103,11 @@
           <el-table-column label="规格满足度详细描述" min-width="500">
             <template #default="{ row }">
               <div v-if="row.matches && row.matches.length > 0" class="satisfaction-detail">
-                <!-- 显示所有匹配的功能，按相似度排序 -->
+                <!-- 只显示排名第一的最佳匹配 -->
                 <div
-                  v-for="(match, index) in row.matches"
+                  v-for="(match, index) in row.matches.slice(0, 1)"
                   :key="index"
-                  class="match-item"
-                  :class="{ 'is-best': index === 0 }"
+                  class="match-item is-best"
                 >
                   <div class="detail-header">
                     <el-tag
@@ -318,6 +323,23 @@ const getSatisfactionText = (status: string) => {
   return textMap[status] || status
 }
 
+// 高亮关键词
+const highlightKeywords = (text: string, keywords?: string[]) => {
+  if (!text || !keywords || !keywords.length) {
+    return text
+  }
+
+  let highlightedText = text
+  keywords.forEach((keyword) => {
+    const regex = new RegExp(`(${keyword})`, 'gi')
+    highlightedText = highlightedText.replace(
+      regex,
+      '<mark style="background: #fff3cd; padding: 2px 4px; border-radius: 3px; font-weight: 600;">$1</mark>'
+    )
+  })
+  return highlightedText
+}
+
 // 筛选条件变化处理
 const handleFilterChange = () => {
   // 筛选逻辑已在 computed 中处理
@@ -491,5 +513,17 @@ function handleExport() {
 
 .ml-10 {
   margin-left: 10px;
+}
+
+// 关键字高亮样式
+:deep(mark) {
+  background: #fff3cd;
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-weight: 600;
+}
+
+.requirement-text-with-highlight {
+  line-height: 1.8;
 }
 </style>
