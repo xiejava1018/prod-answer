@@ -388,6 +388,8 @@ class LLMUsageLogAdmin(admin.ModelAdmin):
         }),
     )
 
+    actions = ['export_to_csv']
+
     def REQUEST_ID_preview(self, obj):
         """Display preview of REQUEST_ID."""
         return obj.REQUEST_ID[:16] + '...'
@@ -405,8 +407,6 @@ class LLMUsageLogAdmin(admin.ModelAdmin):
         """Annotate queryset with additional info."""
         qs = super().get_queryset(request)
         return qs.select_related()
-
-    actions = ['export_to_csv']
 
     def export_to_csv(self, request, queryset):
         """Export selected logs to CSV."""

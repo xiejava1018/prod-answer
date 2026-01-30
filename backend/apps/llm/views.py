@@ -436,21 +436,25 @@ class LLMUsageLogViewSet(viewsets.ReadOnlyModelViewSet):
             total_requests=Count('id'),
             total_tokens=Sum('total_tokens'),
             total_cost=Sum('cost_usd'),
-            avg_cost=Avg('cost_usd'),
-            avg_tokens=Avg('total_tokens')
+            avg_cost=Avg('cost_usd')
         ).order_by('-total_cost')[:10]
 
         model_stats_data = []
         for stat in provider_model_stats:
+            # Calculate avg_tokens manually to avoid aggregate conflict
+            total_tokens = stat['total_tokens'] or 0
+            total_requests = stat['total_requests'] or 0
+            avg_tokens = round(total_tokens / total_requests, 1) if total_requests > 0 else 0
+
             model_stats_data.append({
                 'provider': stat['provider'],
                 'model': stat['model'],
                 'days': days,
                 'total_requests': stat['total_requests'],
-                'total_tokens': stat['total_tokens'] or 0,
+                'total_tokens': total_tokens,
                 'total_cost': round(stat['total_cost'] or 0, 6),
                 'avg_cost': round(stat['avg_cost'] or 0, 6),
-                'avg_tokens': round(stat['avg_tokens'] or 0, 1)
+                'avg_tokens': avg_tokens
             })
 
         return Response({
@@ -567,21 +571,25 @@ class LLMUsageLogViewSet(viewsets.ReadOnlyModelViewSet):
             total_requests=Count('id'),
             total_tokens=Sum('total_tokens'),
             total_cost=Sum('cost_usd'),
-            avg_cost=Avg('cost_usd'),
-            avg_tokens=Avg('total_tokens')
+            avg_cost=Avg('cost_usd')
         ).order_by('-total_cost')
 
         results = []
         for stat in stats:
+            # Calculate avg_tokens manually
+            total_tokens = stat['total_tokens'] or 0
+            total_requests = stat['total_requests'] or 0
+            avg_tokens = round(total_tokens / total_requests, 1) if total_requests > 0 else 0
+
             results.append({
                 'provider': stat['provider'],
                 'model': stat['model'],
                 'days': days,
                 'total_requests': stat['total_requests'],
-                'total_tokens': stat['total_tokens'] or 0,
+                'total_tokens': total_tokens,
                 'total_cost': round(stat['total_cost'] or 0, 6),
                 'avg_cost': round(stat['avg_cost'] or 0, 6),
-                'avg_tokens': round(stat['avg_tokens'] or 0, 1)
+                'avg_tokens': avg_tokens
             })
 
         return Response({
