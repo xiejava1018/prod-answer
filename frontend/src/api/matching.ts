@@ -70,6 +70,15 @@ export const matchingApi = {
     return post<MatchAnalyzeResponse>(`${MATCHING_PREFIX}/`, data)
   },
 
+  analyzeEnhanced(data: {
+    requirement_id: string
+    threshold?: number
+    llm_config_id?: string
+    llm_analysis_mode?: 'full' | 'quick'
+  }) {
+    return post<MatchAnalyzeResponse>(`${MATCHING_PREFIX}/analyze-enhanced/`, data)
+  },
+
   getMatchResults(requirementId: string) {
     return get<MatchResult>(`${MATCHING_PREFIX}/results/${requirementId}/`)
   },

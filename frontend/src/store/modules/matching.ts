@@ -74,6 +74,26 @@ export const useMatchingStore = defineStore('matching', () => {
     }
   }
 
+  async function analyzeEnhanced(
+    requirementId: string,
+    threshold?: number,
+    llm_config_id?: string,
+    llm_analysis_mode?: 'full' | 'quick'
+  ) {
+    loading.value = true
+    try {
+      const response = await matchingApi.analyzeEnhanced({
+        requirement_id: requirementId,
+        threshold,
+        llm_config_id,
+        llm_analysis_mode
+      })
+      return response
+    } finally {
+      loading.value = false
+    }
+  }
+
   async function fetchMatchResults(requirementId: string) {
     loading.value = true
     try {
@@ -101,6 +121,7 @@ export const useMatchingStore = defineStore('matching', () => {
     createTextRequirement,
     uploadRequirement,
     analyzeMatch,
+    analyzeEnhanced,
     fetchMatchResults,
     clearCurrentRequirement
   }

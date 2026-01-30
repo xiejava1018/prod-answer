@@ -145,6 +145,13 @@
               <el-input-number v-model="limit" :min="1" :max="10" />
             </el-form-item>
 
+            <el-form-item label="LLM增强分析">
+              <el-switch v-model="enableLLMAnalysis" />
+              <div class="form-tip">
+                启用 fanc后将使用LLM进行智能语义分析，提高匹配准确度
+              </div>
+            </el-form-item>
+
             <el-form-item>
               <el-button
                 type="primary"
@@ -342,6 +349,7 @@ const selectedRequirementId = ref<string>('')
 
 const threshold = ref(0.65)
 const limit = ref(5)
+const enableLLMAnalysis = ref(false)
 
 const analysisResult = ref<MatchAnalyzeResponse | null>(null)
 
@@ -371,10 +379,23 @@ async function handleAnalyze() {
 
   analyzing.value = true
   try {
-    const result = await matchingStore.analyzeMatch(
-      selectedRequirementId.value,
-      threshold.value
-    )
+    let result
+    if (enableLLMAnalysis.value) {
+      // 使用LLM增强分析
+      result = await matchingStore.analyzeEnhanced(
+        selectedRequirementId.value,
+        threshold.value,
+        undefined, // llm_config_id (使用默认配置)
+        'full' as 'full' | 'quick' // llm_analysis_mode
+      )
+      ElMessage.info('使用LLM增强分析中...')
+    } else {
+      // 使用基础向量化匹配
+      result = await matchingStore.analyzeMatch(
+        selectedRequirementId.value,
+        threshold.value
+      )
+    }
 
     analysisResult.value = result
 
@@ -382,8 +403,9 @@ async function handleAnalyze() {
     const matchCount = result.total_matches || 0
     const itemCount = result.total_items || 0
 
+    const mode = enableLLMAnalysis.value ? 'LLM增强' : '向量化'
     ElMessage.success({
-      message: `匹配分析完成！共 ${itemCount} 个需求项，匹配到 ${matchCount} 个结果`,
+      message: `${mode}匹配分析完成！共 ${itemCount} 个需求项，匹配到 ${matchCount} 个结果`,
       duration: 2000,
       onClose: () => {
         // 自动跳转到结果详情页
