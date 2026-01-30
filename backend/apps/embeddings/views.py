@@ -4,6 +4,7 @@ API views for Embedding configuration and services.
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.permissions import AllowAny
 
 from .models import EmbeddingModelConfig
 from .serializers import (
@@ -19,6 +20,8 @@ class EmbeddingConfigViewSet(viewsets.ModelViewSet):
     """
     ViewSet for EmbeddingModelConfig management.
 
+    DEVELOPMENT MODE: No authentication required for easier testing
+
     list: List all embedding model configurations
     retrieve: Get configuration details
     create: Create a new configuration
@@ -29,6 +32,15 @@ class EmbeddingConfigViewSet(viewsets.ModelViewSet):
 
     queryset = EmbeddingModelConfig.objects.all()
     serializer_class = EmbeddingModelConfigSerializer
+
+    def get_permissions(self):
+        """
+        Set permissions based on action.
+        DEVELOPMENT MODE: Allow all actions without authentication
+        """
+        # TODO: Restore authentication for production
+        permission_classes = [AllowAny]
+        return [permission() for permission in permission_classes]
 
     def get_queryset(self):
         """Filter queryset based on user permissions."""

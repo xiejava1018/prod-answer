@@ -9,7 +9,7 @@ from .views import LLMConfigViewSet, LLMAnalysisResultViewSet, LLMUsageLogViewSe
 app_name = 'llm'
 
 router = DefaultRouter()
-router.register(r'llm-configs', LLMConfigViewSet, basename='llm-config')
+router.register(r'configs', LLMConfigViewSet, basename='llm-config')
 router.register(r'analysis-results', LLMAnalysisResultViewSet, basename='llm-analysis-result')
 router.register(r'usage', LLMUsageLogViewSet, basename='llm-usage')
 
