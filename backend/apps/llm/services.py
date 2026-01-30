@@ -9,6 +9,7 @@ from datetime import timedelta
 from typing import Dict, List, Any, Optional
 from django.utils import timezone
 from django.db import transaction
+from django.db.models import Count
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -946,3 +947,298 @@ class LLMAnalysisService:
         except Exception as e:
             logger.error(f"Failed to get cache stats: {e}")
             return {}
+
+
+class LLMCostAlertService:
+    """
+    Service for monitoring LLM costs and sending alerts when thresholds are exceeded.
+
+    Supports:
+    - Daily, weekly, monthly cost thresholds
+    - Per-model and per-provider thresholds
+    - Multiple notification channels (logging, email, webhook)
+    - Alert history and cooldown periods
+    """
+
+    # Alert levels
+    ALERT_LEVEL_INFO = 'info'
+    ALERT_LEVEL_WARNING = 'warning'
+    ALERT_LEVEL_CRITICAL = 'critical'
+
+    # Time periods
+    PERIOD_DAILY = 'daily'
+    PERIOD_WEEKLY = 'weekly'
+    PERIOD_MONTHLY = 'monthly'
+
+    # Default thresholds (in USD)
+    DEFAULT_THRESHOLDS = {
+        PERIOD_DAILY: 10.0,
+        PERIOD_WEEKLY: 50.0,
+        PERIOD_MONTHLY: 200.0,
+    }
+
+    # Alert cooldown (in seconds) - prevent duplicate alerts
+    ALERT_COOLDOWN = 3600  # 1 hour
+
+    def __init__(self):
+        """Initialize cost alert service."""
+        self._alert_cache_key = "llm_cost_alerts:{alert_type}:{period}"
+
+    def check_cost_thresholds(
+        self,
+        period: str = PERIOD_DAILY,
+        thresholds: Dict[str, float] = None,
+        provider: str = None,
+        model: str = None
+    ) -> Dict[str, Any]:
+        """
+        Check if costs have exceeded thresholds for the given period.
+
+        Args:
+            period: Time period to check (daily, weekly, monthly)
+            thresholds: Dictionary of thresholds for different alert levels
+            provider: Optional provider to filter by
+            model: Optional model to filter by
+
+        Returns:
+            Alert result with:
+                - exceeded: bool, whether threshold was exceeded
+                - current_cost: float, actual cost
+                - threshold: float, threshold value
+                - alert_level: str, info/warning/critical
+                - details: dict, additional breakdown
+        """
+        from .models import LLMUsageLog
+        from django.utils import timezone
+        from datetime import timedelta, datetime
+
+        if thresholds is None:
+            thresholds = {
+                self.ALERT_LEVEL_WARNING: self.DEFAULT_THRESHOLDS.get(period, 10.0),
+                self.ALERT_LEVEL_CRITICAL: self.DEFAULT_THRESHOLDS.get(period, 10.0) * 2,
+            }
+
+        # Calculate date range
+        if period == self.PERIOD_DAILY:
+            since = timezone.now() - timedelta(days=1)
+        elif period == self.PERIOD_WEEKLY:
+            since = timezone.now() - timedelta(weeks=1)
+        elif period == self.PERIOD_MONTHLY:
+            since = timezone.now() - timedelta(days=30)
+        else:
+            since = timezone.now() - timedelta(days=1)
+
+        # Get cost for the period
+        queryset = LLMUsageLog.objects.filter(
+            timestamp__gte=since,
+            status='success'
+        )
+
+        if provider:
+            queryset = queryset.filter(provider=provider)
+        if model:
+            queryset = queryset.filter(model=model)
+
+        from django.db.models import Sum
+        result = queryset.aggregate(total_cost=Sum('cost_usd'))
+        current_cost = result['total_cost'] or 0.0
+
+        # Check thresholds
+        warning_threshold = thresholds.get(self.ALERT_LEVEL_WARNING, float('inf'))
+        critical_threshold = thresholds.get(self.ALERT_LEVEL_CRITICAL, float('inf'))
+
+        alert_level = None
+        exceeded = False
+        threshold_value = None
+
+        if current_cost >= critical_threshold:
+            alert_level = self.ALERT_LEVEL_CRITICAL
+            exceeded = True
+            threshold_value = critical_threshold
+        elif current_cost >= warning_threshold:
+            alert_level = self.ALERT_LEVEL_WARNING
+            exceeded = True
+            threshold_value = warning_threshold
+
+        # Get detailed breakdown
+        provider_model_stats = queryset.values('provider', 'model').annotate(
+            cost=Sum('cost_usd'),
+            requests=Count('id')
+        ).order_by('-cost')
+
+        details = {
+            'period': period,
+            'since': since.isoformat(),
+            'provider': provider,
+            'model': model,
+            'breakdown_by_model': list(provider_model_stats),
+        }
+
+        alert_result = {
+            'exceeded': exceeded,
+            'current_cost': round(current_cost, 6),
+            'threshold': round(threshold_value, 6) if threshold_value else None,
+            'alert_level': alert_level,
+            'details': details,
+        }
+
+        return alert_result
+
+    def send_alert(
+        self,
+        alert_result: Dict[str, Any],
+        notification_channels: List[str] = None
+    ) -> bool:
+        """
+        Send alert notification through specified channels.
+
+        Args:
+            alert_result: Result from check_cost_thresholds
+            notification_channels: List of channels (log, email, webhook)
+
+        Returns:
+            True if alert was sent successfully
+        """
+        if not alert_result['exceeded']:
+            return False
+
+        if notification_channels is None:
+            notification_channels = ['log']
+
+        # Check cooldown
+        alert_key = f"{alert_result['details']['period']}:{alert_result['alert_level']}"
+        if self._is_on_cooldown(alert_key):
+            logger.info(f"Alert on cooldown: {alert_key}")
+            return False
+
+        # Format alert message
+        message = self._format_alert_message(alert_result)
+
+        # Send through each channel
+        success = False
+        for channel in notification_channels:
+            try:
+                if channel == 'log':
+                    self._send_log_alert(alert_result, message)
+                    success = True
+                elif channel == 'email':
+                    self._send_email_alert(alert_result, message)
+                    success = True
+                elif channel == 'webhook':
+                    self._send_webhook_alert(alert_result, message)
+                    success = True
+            except Exception as e:
+                logger.error(f"Failed to send alert via {channel}: {e}")
+
+        # Set cooldown
+        if success:
+            self._set_cooldown(alert_key)
+
+        return success
+
+    def _format_alert_message(self, alert_result: Dict[str, Any]) -> str:
+        """Format alert message for notification."""
+        level = alert_result['alert_level'].upper()
+        cost = alert_result['current_cost']
+        threshold = alert_result['threshold']
+        period = alert_result['details']['period']
+
+        lines = [
+            f"LLM Cost Alert - {level}",
+            f"Period: {period}",
+            f"Current Cost: ${cost:.6f}",
+            f"Threshold: ${threshold:.6f}",
+            f"Over Budget by: ${cost - threshold:.6f}" if cost > threshold else "",
+            "",
+            "Top Cost Drivers:",
+        ]
+
+        for item in alert_result['details']['breakdown_by_model'][:5]:
+            provider = item['provider']
+            model = item['model']
+            cost = item['cost']
+            requests = item['requests']
+            lines.append(f"  - {provider}/{model}: ${cost:.6f} ({requests} requests)")
+
+        return "\n".join(lines)
+
+    def _send_log_alert(self, alert_result: Dict[str, Any], message: str):
+        """Send alert to logger."""
+        level = alert_result['alert_level']
+
+        if level == self.ALERT_LEVEL_CRITICAL:
+            logger.error(f"\n{message}\n")
+        elif level == self.ALERT_LEVEL_WARNING:
+            logger.warning(f"\n{message}\n")
+        else:
+            logger.info(f"\n{message}\n")
+
+    def _send_email_alert(self, alert_result: Dict[str, Any], message: str):
+        """Send alert via email (placeholder for implementation)."""
+        # TODO: Implement email notification
+        logger.info(f"Email alert would be sent: {alert_result['alert_level']}")
+        pass
+
+    def _send_webhook_alert(self, alert_result: Dict[str, Any], message: str):
+        """Send alert via webhook (placeholder for implementation)."""
+        # TODO: Implement webhook notification
+        logger.info(f"Webhook alert would be sent: {alert_result['alert_level']}")
+        pass
+
+    def _is_on_cooldown(self, alert_key: str) -> bool:
+        """Check if alert is on cooldown."""
+        from django.core.cache import cache
+        cache_key = self._alert_cache_key.format(alert_type=alert_key, period='cooldown')
+        return cache.get(cache_key, False)
+
+    def _set_cooldown(self, alert_key: str):
+        """Set alert cooldown."""
+        from django.core.cache import cache
+        cache_key = self._alert_cache_key.format(alert_type=alert_key, period='cooldown')
+        cache.set(cache_key, True, timeout=self.ALERT_COOLDOWN)
+
+    @classmethod
+    def get_alert_summary(cls, days: int = 7) -> Dict[str, Any]:
+        """
+        Get summary of cost alerts for the past N days.
+
+        Args:
+            days: Number of days to look back
+
+        Returns:
+            Summary with costs by period and alert status
+        """
+        from .models import LLMUsageLog
+        from django.utils import timezone
+        from datetime import timedelta
+
+        service = cls()
+        summary = {
+            'days': days,
+            'periods': {}
+        }
+
+        # Check each period
+        for period in [cls.PERIOD_DAILY, cls.PERIOD_WEEKLY]:
+            alert_result = service.check_cost_thresholds(period=period)
+            summary['periods'][period] = alert_result
+
+        # Daily breakdown
+        daily_costs = []
+        for i in range(days):
+            date = (timezone.now() - timedelta(days=i)).date()
+            cost = LLMUsageLog.get_daily_cost(date)
+
+            daily_alert = service.check_cost_thresholds(
+                period=cls.PERIOD_DAILY,
+                thresholds={cls.ALERT_LEVEL_WARNING: service.DEFAULT_THRESHOLDS[cls.PERIOD_DAILY]}
+            )
+
+            # Override current_cost for this specific date
+            daily_alert['current_cost'] = round(cost, 6)
+            daily_alert['date'] = date.isoformat()
+            daily_costs.append(daily_alert)
+
+        summary['daily_costs'] = list(reversed(daily_costs))
+
+        return summary

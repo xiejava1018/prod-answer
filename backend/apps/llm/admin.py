@@ -4,7 +4,7 @@ Admin configuration for LLM models.
 from django.contrib import admin
 from django.utils.html import format_html
 from django.db.models import Count, Avg
-from .models import LLMModelConfig, LLMAnalysisResult, LLMCache
+from .models import LLMModelConfig, LLMAnalysisResult, LLMCache, LLMUsageLog
 
 
 @admin.register(LLMModelConfig)
@@ -310,3 +310,135 @@ class LLMCacheAdmin(admin.ModelAdmin):
     def has_change_permission(self, request, obj=None):
         """Make cache entries read-only."""
         return False
+
+
+@admin.register(LLMUsageLog)
+class LLMUsageLogAdmin(admin.ModelAdmin):
+    """Admin interface for LLMUsageLog model."""
+
+    list_display = [
+        'REQUEST_ID_preview',
+        'timestamp',
+        'provider',
+        'model',
+        'request_type',
+        'total_tokens',
+        'cost_usd',
+        'status',
+        'cache_hit',
+        'response_time_ms'
+    ]
+    list_filter = [
+        'provider',
+        'model',
+        'request_type',
+        'status',
+        'cache_hit',
+        'timestamp'
+    ]
+    search_fields = [
+        'REQUEST_ID',
+        'requirement_id',
+        'error_message'
+    ]
+    ordering = ['-timestamp']
+    readonly_fields = [
+        'REQUEST_ID',
+        'timestamp',
+        'provider',
+        'model',
+        'prompt_tokens',
+        'completion_tokens',
+        'total_tokens',
+        'cost_usd',
+        'request_type',
+        'requirement_id',
+        'feature_count',
+        'cache_hit',
+        'response_time_ms',
+        'status',
+        'error_message',
+        'metadata',
+        'created_at'
+    ]
+
+    fieldsets = (
+        ('请求信息', {
+            'fields': ('REQUEST_ID', 'timestamp', 'request_type', 'requirement_id')
+        }),
+        ('模型信息', {
+            'fields': ('provider', 'model')
+        }),
+        ('Token 使用', {
+            'fields': ('prompt_tokens', 'completion_tokens', 'total_tokens')
+        }),
+        ('成本信息', {
+            'fields': ('cost_usd', 'cache_hit', 'feature_count')
+        }),
+        ('性能', {
+            'fields': ('response_time_ms', 'status', 'error_message')
+        }),
+        ('元数据', {
+            'fields': ('metadata',),
+            'classes': ('collapse',)
+        }),
+        ('时间戳', {
+            'fields': ('created_at',),
+            'classes': ('collapse',)
+        }),
+    )
+
+    def REQUEST_ID_preview(self, obj):
+        """Display preview of REQUEST_ID."""
+        return obj.REQUEST_ID[:16] + '...'
+    REQUEST_ID_preview.short_description = '请求ID'
+
+    def has_add_permission(self, request):
+        """Disable manual adding through admin."""
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        """Make usage logs read-only."""
+        return False
+
+    def get_queryset(self, request):
+        """Annotate queryset with additional info."""
+        qs = super().get_queryset(request)
+        return qs.select_related()
+
+    actions = ['export_to_csv']
+
+    def export_to_csv(self, request, queryset):
+        """Export selected logs to CSV."""
+        import csv
+        from django.http import HttpResponse
+
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="llm_usage_logs.csv"'
+
+        writer = csv.writer(response)
+        writer.writerow([
+            'REQUEST_ID', 'Timestamp', 'Provider', 'Model',
+            'Prompt Tokens', 'Completion Tokens', 'Total Tokens',
+            'Cost (USD)', 'Request Type', 'Cache Hit',
+            'Response Time (ms)', 'Status'
+        ])
+
+        for log in queryset:
+            writer.writerow([
+                log.REQUEST_ID,
+                log.timestamp.isoformat(),
+                log.provider,
+                log.model,
+                log.prompt_tokens,
+                log.completion_tokens,
+                log.total_tokens,
+                log.cost_usd,
+                log.request_type,
+                log.cache_hit,
+                log.response_time_ms,
+                log.status
+            ])
+
+        return response
+    export_to_csv.short_description = '导出选中的使用日志为 CSV'

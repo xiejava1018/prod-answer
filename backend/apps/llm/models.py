@@ -329,3 +329,189 @@ class LLMCache(TimeStampedModel):
         """Increment the hit count for this cache entry."""
         self.hit_count += 1
         self.save(update_fields=['hit_count'])
+
+
+class LLMUsageLog(TimeStampedModel):
+    """
+    LLM API usage log for cost tracking and monitoring.
+
+    Records token usage and costs for each LLM API call.
+    Used for monitoring, cost analysis, and budget management.
+    """
+
+    REQUEST_ID = models.CharField(
+        max_length=100,
+        unique=True,
+        db_index=True,
+        help_text="Unique request identifier (UUID)"
+    )
+    timestamp = models.DateTimeField(
+        db_index=True,
+        help_text="When the request was made"
+    )
+    provider = models.CharField(
+        max_length=50,
+        db_index=True,
+        help_text="LLM provider (e.g., 'openai', 'zhipuai')"
+    )
+    model = models.CharField(
+        max_length=100,
+        db_index=True,
+        help_text="Model name (e.g., 'gpt-4o-mini', 'glm-4-flash')"
+    )
+    prompt_tokens = models.IntegerField(
+        validators=[MinValueValidator(0)],
+        help_text="Number of tokens in the prompt"
+    )
+    completion_tokens = models.IntegerField(
+        validators=[MinValueValidator(0)],
+        help_text="Number of tokens in the completion"
+    )
+    total_tokens = models.IntegerField(
+        validators=[MinValueValidator(0)],
+        help_text="Total tokens used"
+    )
+    cost_usd = models.FloatField(
+        validators=[MinValueValidator(0.0)],
+        help_text="Estimated cost in USD"
+    )
+    request_type = models.CharField(
+        max_length=50,
+        help_text="Type of request (e.g., 'analysis', 'batch_analysis', 'keyword_extraction')"
+    )
+    requirement_id = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        db_index=True,
+        help_text="Associated requirement ID (if applicable)"
+    )
+    feature_count = models.IntegerField(
+        default=1,
+        validators=[MinValueValidator(0)],
+        help_text="Number of features analyzed"
+    )
+    cache_hit = models.BooleanField(
+        default=False,
+        help_text="Whether result came from cache"
+    )
+    response_time_ms = models.IntegerField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0)],
+        help_text="Response time in milliseconds"
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=[
+            ('success', '成功'),
+            ('error', '错误'),
+            ('timeout', '超时'),
+        ],
+        default='success',
+        help_text="Request status"
+    )
+    error_message = models.TextField(
+        blank=True,
+        help_text="Error message if request failed"
+    )
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Additional metadata (config_id, mode, etc.)"
+    )
+
+    class Meta:
+        db_table = 'llm_usage_logs'
+        verbose_name = 'LLM Usage Log'
+        verbose_name_plural = 'LLM Usage Logs'
+        ordering = ['-timestamp']
+        indexes = [
+            models.Index(fields=['timestamp']),
+            models.Index(fields=['provider', 'model']),
+            models.Index(fields=['request_type']),
+            models.Index(fields=['requirement_id']),
+            models.Index(fields=['status']),
+            models.Index(fields=['cache_hit']),
+        ]
+
+    def __str__(self):
+        return f"{self.provider}/{self.model} - {self.total_tokens} tokens (${self.cost_usd:.6f})"
+
+    @classmethod
+    def get_daily_cost(cls, date=None):
+        """
+        Get total cost for a specific day.
+
+        Args:
+            date: Date to query (defaults to today)
+
+        Returns:
+            Total cost in USD
+        """
+        from django.utils import timezone
+        from django.db.models import Sum
+
+        if date is None:
+            date = timezone.now().date()
+
+        datetime_start = timezone.make_aware(
+            timezone.datetime.combine(date, timezone.datetime.min.time())
+        )
+        datetime_end = timezone.make_aware(
+            timezone.datetime.combine(date, timezone.datetime.max.time())
+        )
+
+        result = cls.objects.filter(
+            timestamp__range=[datetime_start, datetime_end],
+            status='success'
+        ).aggregate(total_cost=Sum('cost_usd'))
+
+        return result['total_cost'] or 0.0
+
+    @classmethod
+    def get_model_stats(cls, provider, model, days=7):
+        """
+        Get usage statistics for a specific model over N days.
+
+        Args:
+            provider: Provider name
+            model: Model name
+            days: Number of days to look back
+
+        Returns:
+            Dictionary with stats (total_requests, total_tokens, total_cost, avg_cost)
+        """
+        from django.utils import timezone
+        from django.db.models import Sum, Avg, Count
+        from datetime import timedelta
+
+        since = timezone.now() - timedelta(days=days)
+
+        stats = cls.objects.filter(
+            provider=provider,
+            model=model,
+            timestamp__gte=since,
+            status='success'
+        ).aggregate(
+            total_requests=Count('id'),
+            total_tokens=Sum('total_tokens'),
+            total_cost=Sum('cost_usd'),
+            avg_cost=Avg('cost_usd')
+        )
+
+        # Calculate avg_tokens manually to avoid aggregate conflict
+        total_requests = stats['total_requests'] or 0
+        total_tokens = stats['total_tokens'] or 0
+        avg_tokens = round(total_tokens / total_requests, 1) if total_requests > 0 else 0
+
+        return {
+            'provider': provider,
+            'model': model,
+            'days': days,
+            'total_requests': total_requests,
+            'total_tokens': total_tokens,
+            'total_cost': round(stats['total_cost'] or 0.0, 6),
+            'avg_cost': round(stats['avg_cost'] or 0.0, 6),
+            'avg_tokens': avg_tokens,
+        }

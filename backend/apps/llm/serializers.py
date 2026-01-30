@@ -2,7 +2,7 @@
 Serializers for LLM models and services.
 """
 from rest_framework import serializers
-from .models import LLMModelConfig, LLMAnalysisResult
+from .models import LLMModelConfig, LLMAnalysisResult, LLMUsageLog
 
 
 class LLMModelConfigSerializer(serializers.ModelSerializer):
@@ -191,3 +191,103 @@ class LLMAnalysisResultSerializer(serializers.ModelSerializer):
             'qwen': '通义千问',
         }
         return provider_map.get(obj.llm_provider, obj.llm_provider)
+
+
+class LLMUsageLogSerializer(serializers.ModelSerializer):
+    """Serializer for LLMUsageLog model."""
+
+    provider_display = serializers.SerializerMethodField()
+    status_display = serializers.SerializerMethodField()
+    cost_per_1k_tokens = serializers.SerializerMethodField()
+
+    class Meta:
+        model = LLMUsageLog
+        fields = [
+            'id',
+            'REQUEST_ID',
+            'timestamp',
+            'provider',
+            'provider_display',
+            'model',
+            'prompt_tokens',
+            'completion_tokens',
+            'total_tokens',
+            'cost_usd',
+            'cost_per_1k_tokens',
+            'request_type',
+            'requirement_id',
+            'feature_count',
+            'cache_hit',
+            'response_time_ms',
+            'status',
+            'status_display',
+            'error_message',
+            'metadata',
+            'created_at',
+        ]
+        read_only_fields = ['id', 'REQUEST_ID', 'timestamp', 'created_at']
+
+    def get_provider_display(self, obj):
+        """Get provider display name."""
+        provider_map = {
+            'openai': 'OpenAI',
+            'zhipuai': '智谱AI',
+            'qwen': '通义千问',
+        }
+        return provider_map.get(obj.provider, obj.provider)
+
+    def get_status_display(self, obj):
+        """Get status display name."""
+        status_map = {
+            'success': '成功',
+            'error': '错误',
+            'timeout': '超时',
+        }
+        return status_map.get(obj.status, obj.status)
+
+    def get_cost_per_1k_tokens(self, obj):
+        """Calculate cost per 1k tokens."""
+        if obj.total_tokens and obj.total_tokens > 0:
+            return round((obj.cost_usd / obj.total_tokens) * 1000, 6)
+        return None
+
+
+class DailyCostSerializer(serializers.Serializer):
+    """Serializer for daily cost summary."""
+
+    date = serializers.DateField()
+    total_cost = serializers.FloatField()
+    total_requests = serializers.IntegerField()
+    total_tokens = serializers.IntegerField()
+    cache_hit_rate = serializers.FloatField(required=False)
+    avg_response_time_ms = serializers.IntegerField(required=False)
+
+
+class ModelStatsSerializer(serializers.Serializer):
+    """Serializer for model usage statistics."""
+
+    provider = serializers.CharField()
+    model = serializers.CharField()
+    days = serializers.IntegerField()
+    total_requests = serializers.IntegerField()
+    total_tokens = serializers.IntegerField()
+    total_cost = serializers.FloatField()
+    avg_cost = serializers.FloatField()
+    avg_tokens = serializers.FloatField()
+
+
+class UsageSummarySerializer(serializers.Serializer):
+    """Serializer for overall usage summary."""
+
+    total_requests = serializers.IntegerField()
+    total_tokens = serializers.IntegerField()
+    total_cost = serializers.FloatField()
+    cache_hit_count = serializers.IntegerField()
+    cache_miss_count = serializers.IntegerField()
+    cache_hit_rate = serializers.FloatField()
+    success_rate = serializers.FloatField()
+    avg_response_time_ms = serializers.IntegerField()
+    most_used_provider = serializers.CharField()
+    most_used_model = serializers.CharField()
+    daily_costs = DailyCostSerializer(many=True)
+    model_stats = ModelStatsSerializer(many=True)
