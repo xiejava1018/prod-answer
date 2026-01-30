@@ -63,6 +63,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '匹配结果' }
   },
   {
+    path: '/settings',
+    name: 'SettingsIndex',
+    component: () => import('@/views/settings/SettingsIndex.vue'),
+    meta: { title: '系统设置' }
+  },
+  {
     path: '/settings/embeddings',
     name: 'EmbeddingSettings',
     component: () => import('@/views/settings/EmbeddingSettings.vue'),

@@ -17,7 +17,7 @@
           <el-menu-item index="/products">产品管理</el-menu-item>
           <el-menu-item index="/requirements">需求管理</el-menu-item>
           <el-menu-item index="/matching">匹配分析</el-menu-item>
-          <el-menu-item index="/settings/embeddings">系统设置</el-menu-item>
+          <el-menu-item index="/settings">系统设置</el-menu-item>
         </el-menu>
       </div>
     </el-header>
