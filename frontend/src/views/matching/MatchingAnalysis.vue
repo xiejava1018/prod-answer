@@ -173,20 +173,20 @@
           <!-- Summary -->
           <el-row :gutter="20" class="mb-20">
             <el-col :span="6">
-              <el-statistic title="总需求数" :value="analysisResult.summary.total_items" />
+              <el-statistic title="总需求数" :value="analysisResult.total_items" />
             </el-col>
             <el-col :span="6">
-              <el-statistic title="总匹配数" :value="analysisResult.summary.total_matches" />
+              <el-statistic title="总匹配数" :value="analysisResult.total_matches" />
             </el-col>
             <el-col :span="6">
-              <el-statistic title="完全匹配" :value="analysisResult.summary.matched">
+              <el-statistic title="完全匹配" :value="analysisResult.matched">
                 <template #suffix>
                   <span style="color: var(--el-color-success)">✔</span>
                 </template>
               </el-statistic>
             </el-col>
             <el-col :span="6">
-              <el-statistic title="部分匹配" :value="analysisResult.summary.partial_matched">
+              <el-statistic title="部分匹配" :value="analysisResult.partial_matched">
                 <template #suffix>
                   <span style="color: var(--el-color-warning)">◐</span>
                 </template>
@@ -377,9 +377,22 @@ async function handleAnalyze() {
     )
 
     analysisResult.value = result
-    ElMessage.success('匹配分析完成')
-  } catch (error) {
-    ElMessage.error('匹配分析失败')
+
+    // result 直接就是 summary 对象，包含 total_items, total_matches 等字段
+    const matchCount = result.total_matches || 0
+    const itemCount = result.total_items || 0
+
+    ElMessage.success({
+      message: `匹配分析完成！共 ${itemCount} 个需求项，匹配到 ${matchCount} 个结果`,
+      duration: 2000,
+      onClose: () => {
+        // 自动跳转到结果详情页
+        handleViewResults()
+      }
+    })
+  } catch (error: any) {
+    console.error('Matching error:', error)
+    ElMessage.error(error.response?.data?.error || '匹配分析失败')
   } finally {
     analyzing.value = false
   }

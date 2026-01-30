@@ -4,6 +4,9 @@ API views for Matching operations.
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.permissions import AllowAny
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
 from django.utils import timezone
 import logging
 
@@ -24,6 +27,7 @@ import time
 logger = logging.getLogger(__name__)
 
 
+@method_decorator(csrf_exempt, name='dispatch')
 class MatchingViewSet(viewsets.ViewSet):
     """
     ViewSet for matching operations.
@@ -33,6 +37,10 @@ class MatchingViewSet(viewsets.ViewSet):
     summary: Get match summary statistics
     export: Export match results
     """
+
+    # Disable authentication for development
+    authentication_classes = []
+    permission_classes = [AllowAny]
 
     def create(self, request):
         """
@@ -104,7 +112,7 @@ class MatchingViewSet(viewsets.ViewSet):
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['get'], url_path='results/(?P<requirement_id>[^/.]+)')
+    @action(detail=False, methods=['get'], url_path='results/(?P<requirement_id>[^/.]+)', permission_classes=[AllowAny])
     def results(self, request, requirement_id=None):
         """
         Get match results for a requirement.
@@ -128,7 +136,7 @@ class MatchingViewSet(viewsets.ViewSet):
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['get'], url_path='results/(?P<requirement_id>[^/.]+)/summary')
+    @action(detail=False, methods=['get'], url_path='results/(?P<requirement_id>[^/.]+)/summary', permission_classes=[AllowAny])
     def summary(self, request, requirement_id=None):
         """
         Get match summary for a requirement.
@@ -147,7 +155,7 @@ class MatchingViewSet(viewsets.ViewSet):
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['post'], url_path='analyze-enhanced')
+    @action(detail=False, methods=['post'], url_path='analyze-enhanced', permission_classes=[AllowAny])
     def analyze_enhanced(self, request):
         """
         Perform enhanced matching analysis with LLM (always enabled).
@@ -203,7 +211,7 @@ class MatchingViewSet(viewsets.ViewSet):
                 'llm_analysis_failed': True
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['post'], url_path='batch-analyze-enhanced')
+    @action(detail=False, methods=['post'], url_path='batch-analyze-enhanced', permission_classes=[AllowAny])
     def batch_analyze_enhanced(self, request):
         """
         Batch analyze multiple requirements with LLM enhancement.
@@ -289,7 +297,7 @@ class MatchingViewSet(viewsets.ViewSet):
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['get'], url_path='batch-status/(?P<task_id>[^/.]+)')
+    @action(detail=False, methods=['get'], url_path='batch-status/(?P<task_id>[^/.]+)', permission_classes=[AllowAny])
     def batch_status(self, request, task_id=None):
         """
         Get batch processing status.
@@ -303,7 +311,7 @@ class MatchingViewSet(viewsets.ViewSet):
             'task_id': task_id
         }, status=status.HTTP_501_NOT_IMPLEMENTED)
 
-    @action(detail=False, methods=['post'], url_path='export/(?P<requirement_id>[^/.]+)')
+    @action(detail=False, methods=['post'], url_path='export/(?P<requirement_id>[^/.]+)', permission_classes=[AllowAny])
     def export(self, request, requirement_id=None):
         """
         Export match results.
@@ -318,6 +326,7 @@ class MatchingViewSet(viewsets.ViewSet):
         }, status=status.HTTP_501_NOT_IMPLEMENTED)
 
 
+@method_decorator(csrf_exempt, name='dispatch')
 class RequirementViewSet(viewsets.ModelViewSet):
     """
     ViewSet for CapabilityRequirement model.
@@ -329,6 +338,10 @@ class RequirementViewSet(viewsets.ModelViewSet):
     partial_update: Partially update a requirement
     destroy: Delete a requirement
     """
+
+    # Disable authentication for development
+    authentication_classes = []
+    permission_classes = [AllowAny]
 
     queryset = CapabilityRequirement.objects.all()
     filterset_fields = ['status', 'requirement_type']
@@ -380,7 +393,7 @@ class RequirementViewSet(viewsets.ModelViewSet):
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=True, methods=['get'])
+    @action(detail=True, methods=['get'], permission_classes=[AllowAny])
     def items(self, request, pk=None):
         """
         Get requirement items.
@@ -405,7 +418,7 @@ class RequirementViewSet(viewsets.ModelViewSet):
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], permission_classes=[AllowAny])
     def process(self, request, pk=None):
         """
         Process requirement and generate embeddings.

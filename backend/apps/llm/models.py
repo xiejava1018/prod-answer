@@ -24,6 +24,7 @@ class LLMModelConfig(TimeStampedModel):
         ('openai', 'OpenAI'),
         ('zhipuai', '智谱AI ZhipuAI'),
         ('qwen', '阿里通义千问 Qwen'),
+        ('siliconflow', '硅基流动 SiliconFlow'),
         ('other', '其他'),
     ]
 
@@ -73,6 +74,12 @@ class LLMModelConfig(TimeStampedModel):
         verbose_name = 'LLM Model Config'
         verbose_name_plural = 'LLM Model Configs'
         ordering = ['-is_default', 'provider', 'model_name']
+        constraints = [
+            models.UniqueConstraint(
+            fields=['provider', 'model_name'],
+            name='unique_provider_model'
+            )
+        ]
 
     def __str__(self):
         return f"{self.provider}/{self.model_name}"

@@ -3,9 +3,11 @@ API views for LLM configuration and services.
 """
 import time
 from rest_framework import viewsets, status
-from rest_framework.decorators import action
+from rest_framework.decorators import action, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
 
 from .models import LLMModelConfig, LLMAnalysisResult, LLMUsageLog
 from .serializers import (
@@ -20,6 +22,7 @@ from .serializers import (
 from .services import LLMProviderFactory
 
 
+@method_decorator(csrf_exempt, name='dispatch')
 class LLMConfigViewSet(viewsets.ModelViewSet):
     """
     ViewSet for LLMModelConfig management.
@@ -36,6 +39,8 @@ class LLMConfigViewSet(viewsets.ModelViewSet):
 
     queryset = LLMModelConfig.objects.all()
     serializer_class = LLMModelConfigSerializer
+    authentication_classes = []  # Disable authentication
+    permission_classes = [AllowAny]  # Allow all access
 
     def get_permissions(self):
         """
@@ -66,7 +71,7 @@ class LLMConfigViewSet(viewsets.ModelViewSet):
 
         return queryset.order_by('-is_default', 'provider', 'model_name')
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], permission_classes=[AllowAny])
     def test(self, request, pk=None):
         """
         Test the connection to an LLM provider.

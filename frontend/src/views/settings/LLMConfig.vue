@@ -119,7 +119,7 @@
     >
       <el-form :model="form" :rules="rules" ref="formRef" label-width="120px">
         <el-form-item label="提供商" prop="provider">
-          <el-select v-model="form.provider" placeholder="选择提供商" style="width: 100%">
+          <el-select v-model="form.provider" placeholder="选择提供商" style="width: 100%" @change="handleProviderChange">
             <el-option label="OpenAI" value="openai" />
             <el-option label="ZhipuAI" value="zhipuai" />
             <el-option label="Qwen" value="qwen" />
@@ -129,11 +129,28 @@
 
         <el-form-item label="模型名称" prop="model_name">
           <el-input v-model="form.model_name" placeholder="例如: gpt-4o-mini" />
+          <div class="form-tip" v-if="form.provider === 'openai'">
+            推荐: gpt-4o-mini (性价比高) 或 gpt-4o (性能更强)
+          </div>
+          <div class="form-tip" v-else-if="form.provider === 'zhipuai'">
+            推荐: glm-4-flash (免费) 或 glm-4-plus (性能更强)
+          </div>
+          <div class="form-tip" v-else-if="form.provider === 'qwen'">
+            推荐: qwen-plus (性价比高) 或 qwen-max (性能更强)
+          </div>
+          <div class="form-tip" v-else-if="form.provider === 'siliconflow'">
+            推荐: Qwen/Qwen2.5-7B-Instruct 或其他开源模型
+          </div>
         </el-form-item>
 
         <el-form-item label="API地址" prop="base_url">
-          <el-input v-model="form.base_url" placeholder="例如: https://api.openai.com/v1" />
-          <div class="form-tip">可选，留空使用默认地址</div>
+          <el-input v-model="form.base_url" placeholder="自动填充或手动输入" />
+          <div class="form-tip" v-if="form.provider === 'openai'">
+            留空使用默认地址 https://api.openai.com/v1
+          </div>
+          <div class="form-tip" v-else-if="form.provider !== 'openai' && form.base_url">
+            已自动填充推荐地址，可按需修改
+          </div>
         </el-form-item>
 
         <el-form-item label="API密钥" prop="api_key">
@@ -147,17 +164,19 @@
 
         <el-form-item label="最大Token" prop="max_tokens">
           <el-input-number v-model="form.max_tokens" :min="1" :max="100000" style="width: 100%" />
+          <div class="form-tip">已根据模型自动设置推荐值</div>
         </el-form-item>
 
         <el-form-item label="温度" prop="temperature">
           <el-slider v-model="form.temperature" :min="0" :max="2" :step="0.1" show-input />
+          <div class="form-tip">0.0-2.0，值越高输出越随机，0.7为推荐值</div>
         </el-form-item>
 
-        <el-form-item label="状态">
+        <el-form-item label="状态" prop="is_active">
           <el-switch v-model="form.is_active" active-text="启用" inactive-text="禁用" />
         </el-form-item>
 
-        <el-form-item label="设为默认">
+        <el-form-item label="设为默认" prop="is_default">
           <el-switch v-model="form.is_default" />
         </el-form-item>
       </el-form>
@@ -207,7 +226,20 @@ const form = reactive({
 const rules: FormRules = {
   provider: [{ required: true, message: '请选择提供商', trigger: 'change' }],
   model_name: [{ required: true, message: '请输入模型名称', trigger: 'blur' }],
-  api_key: [{ required: true, message: '请输入API密钥', trigger: 'blur' }],
+  api_key: [
+    {
+      required: true,
+      message: '请输入API密钥',
+      trigger: 'blur',
+      validator: (rule, value, callback) => {
+        if (!value || value.trim() === '') {
+          callback(new Error('请输入API密钥'))
+        } else {
+          callback()
+        }
+      }
+    }
+  ],
   max_tokens: [{ required: true, message: '请输入最大Token数', trigger: 'blur' }]
 }
 
@@ -215,13 +247,14 @@ const rules: FormRules = {
 const loadConfigs = async () => {
   loading.value = true
   try {
-    const { data } = await llmConfigApi.list(filters)
-    configs.value = data.providers.map((config: LLMModelConfig) => ({
+    const response = await llmConfigApi.list(filters)
+    configs.value = (response.results || response.providers || []).map((config: LLMModelConfig) => ({
       ...config,
       testing: false,
       toggling: false
     }))
   } catch (error: any) {
+    console.error('Load configs error:', error)
     ElMessage.error(error.response?.data?.error || '加载配置失败')
   } finally {
     loading.value = false
@@ -230,6 +263,10 @@ const loadConfigs = async () => {
 
 const showCreateDialog = () => {
   isEdit.value = false
+  // 重置表单并设置默认值
+  resetForm()
+  // 触发一次提供商联动以设置初始值
+  handleProviderChange()
   dialogVisible.value = true
 }
 
@@ -254,7 +291,7 @@ const resetForm = () => {
   Object.assign(form, {
     id: '',
     provider: 'openai',
-    model_name: '',
+    model_name: 'gpt-4o-mini',
     base_url: '',
     api_key: '',
     max_tokens: 4096,
@@ -264,24 +301,71 @@ const resetForm = () => {
   })
 }
 
+const handleProviderChange = () => {
+  const provider = form.provider
+
+  // 根据提供商自动配置模型名称和API地址
+  if (provider === 'openai') {
+    form.model_name = 'gpt-4o-mini'
+    form.base_url = ''
+    form.max_tokens = 4096
+    form.temperature = 0.7
+  } else if (provider === 'zhipuai') {
+    form.model_name = 'glm-4-flash'
+    form.base_url = 'https://open.bigmodel.cn/api/paas/v4'
+    form.max_tokens = 8192
+    form.temperature = 0.7
+  } else if (provider === 'qwen') {
+    form.model_name = 'qwen-plus'
+    form.base_url = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+    form.max_tokens = 8192
+    form.temperature = 0.7
+  } else if (provider === 'siliconflow') {
+    form.model_name = 'Qwen/Qwen2.5-7B-Instruct'
+    form.base_url = 'https://api.siliconflow.cn/v1'
+    form.max_tokens = 4096
+    form.temperature = 0.7
+  }
+}
+
 const submitForm = async () => {
   if (!formRef.value) return
 
   await formRef.value.validate(async (valid) => {
     if (!valid) return
 
+    // 检查重复配置（只在创建模式下）
+    if (!isEdit.value) {
+      const duplicate = configs.value.find(
+        c => c.provider === form.provider && c.model_name === form.model_name
+      )
+      if (duplicate) {
+        ElMessage.error(
+          `该配置已存在：${getProviderLabel(form.provider)} - ${form.model_name}`
+        )
+        return
+      }
+    }
+
     submitting.value = true
     try {
       const payload: any = {
         provider: form.provider,
         model_name: form.model_name,
-        base_url: form.base_url || undefined,
+        base_url: form.base_url || '',
         api_key_encrypted: form.api_key,
         max_tokens: form.max_tokens,
         temperature: form.temperature,
         is_active: form.is_active,
         is_default: form.is_default
       }
+
+      // 只在编辑模式且未修改密钥时才不发送api_key
+      if (isEdit.value && !form.api_key) {
+        delete payload.api_key_encrypted
+      }
+
+      console.log('Submitting payload:', JSON.stringify(payload, null, 2))
 
       if (isEdit.value) {
         await llmConfigApi.update(form.id, payload)
@@ -294,7 +378,17 @@ const submitForm = async () => {
       dialogVisible.value = false
       loadConfigs()
     } catch (error: any) {
-      ElMessage.error(error.response?.data?.error || '操作失败')
+      console.error('Submit error:', error)
+      console.error('Error response data:', error.response?.data)
+
+      // 显示详细的错误信息
+      const errorMsg = error.response?.data
+        ? (typeof error.response.data === 'string'
+          ? error.response.data
+          : JSON.stringify(error.response.data))
+        : (error.message || '操作失败')
+
+      ElMessage.error('创建失败: ' + errorMsg)
     } finally {
       submitting.value = false
     }
@@ -304,11 +398,11 @@ const submitForm = async () => {
 const testConnection = async (row: any) => {
   row.testing = true
   try {
-    const { data } = await llmConfigApi.test(row.id)
-    if (data.is_connected) {
-      ElMessage.success(`连接成功！响应时间: ${data.response_time_ms}ms`)
+    const result = await llmConfigApi.test(row.id)
+    if (result.is_connected) {
+      ElMessage.success(`连接成功！响应时间: ${result.response_time_ms}ms`)
     } else {
-      ElMessage.error(data.error || '连接失败')
+      ElMessage.error(result.error || '连接失败')
     }
   } catch (error: any) {
     ElMessage.error(error.response?.data?.error || '连接测试失败')

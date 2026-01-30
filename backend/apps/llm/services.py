@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 class LLMProviderFactory:
     """
     Factory class for creating and managing LLM providers.
-    Supports multiple LLM providers (OpenAI, ZhipuAI, Qwen).
+    Supports multiple LLM providers (OpenAI, ZhipuAI, Qwen, SiliconFlow).
     """
 
     # Registry of available providers
@@ -36,6 +36,7 @@ class LLMProviderFactory:
         'openai': OpenAIProvider,
         'zhipuai': ZhipuAIProvider,
         'qwen': QwenProvider,
+        'siliconflow': OpenAIProvider,  # SiliconFlow uses OpenAI-compatible API
     }
 
     # Cache for provider instances

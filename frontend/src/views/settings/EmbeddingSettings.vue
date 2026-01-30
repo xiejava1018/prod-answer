@@ -243,7 +243,7 @@
             </div>
           </el-form-item>
 
-          <el-form-item label="模型名称">
+          <el-form-item label="模型名称" prop="model">
             <el-input
               v-model="modelParams.model"
               placeholder="例如: BAAI/bge-large-zh-v1.5"
@@ -256,7 +256,7 @@
 
         <!-- OpenAI Configuration -->
         <template v-if="formData.model_type === 'openai'">
-          <el-form-item label="提供商">
+          <el-form-item label="提供商" prop="provider">
             <el-input v-model="formData.provider" disabled />
           </el-form-item>
 
@@ -269,7 +269,7 @@
             />
           </el-form-item>
 
-          <el-form-item label="API端点">
+          <el-form-item label="API端点" prop="api_endpoint">
             <el-input
               v-model="formData.api_endpoint"
               placeholder="https://api.openai.com/v1 (可选)"
@@ -286,7 +286,7 @@
 
         <!-- Sentence-Transformers Configuration -->
         <template v-if="formData.model_type === 'sentence-transformers'">
-          <el-form-item label="提供商">
+          <el-form-item label="提供商" prop="provider">
             <el-input v-model="formData.provider" disabled />
           </el-form-item>
 
@@ -308,7 +308,7 @@
           </el-form-item>
         </template>
 
-        <el-form-item label="状态">
+        <el-form-item label="状态" prop="is_active">
           <el-checkbox v-model="formData.is_active">启用此配置</el-checkbox>
           <el-checkbox v-model="formData.is_default" class="ml-20">设为默认</el-checkbox>
           <div class="form-tip">

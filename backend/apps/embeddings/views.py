@@ -2,9 +2,11 @@
 API views for Embedding configuration and services.
 """
 from rest_framework import viewsets, status
-from rest_framework.decorators import action
+from rest_framework.decorators import action, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
 
 from .models import EmbeddingModelConfig
 from .serializers import (
@@ -16,6 +18,7 @@ from .serializers import (
 from .services import EmbeddingServiceFactory
 
 
+@method_decorator(csrf_exempt, name='dispatch')
 class EmbeddingConfigViewSet(viewsets.ModelViewSet):
     """
     ViewSet for EmbeddingModelConfig management.
@@ -32,6 +35,8 @@ class EmbeddingConfigViewSet(viewsets.ModelViewSet):
 
     queryset = EmbeddingModelConfig.objects.all()
     serializer_class = EmbeddingModelConfigSerializer
+    authentication_classes = []  # Disable authentication
+    permission_classes = [AllowAny]  # Allow all access
 
     def get_permissions(self):
         """
@@ -79,7 +84,7 @@ class EmbeddingConfigViewSet(viewsets.ModelViewSet):
             'config': serializer.data
         })
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], permission_classes=[AllowAny])
     def test_connection(self, request, pk=None):
         """
         Test the connection to an embedding model.

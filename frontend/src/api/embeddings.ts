@@ -9,8 +9,8 @@ import type {
   EmbeddingEncodeResponse
 } from '@/types'
 
-const CONFIGS_PREFIX = '/v1/embeddings/configs'
-const SERVICE_PREFIX = '/v1/embeddings/service'
+const CONFIGS_PREFIX = '/v1/configs'
+const SERVICE_PREFIX = '/v1/service'
 
 export const embeddingsApi = {
   // Config management

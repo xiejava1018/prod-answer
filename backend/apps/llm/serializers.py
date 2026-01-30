@@ -92,6 +92,24 @@ class LLMModelConfigSerializer(serializers.ModelSerializer):
         if not provider and self.instance:
             provider = self.instance.provider
 
+        model_name = data.get('model_name')
+        if model_name and provider:
+            # Check for duplicate configuration
+            from .models import LLMModelConfig
+            existing = LLMModelConfig.objects.filter(
+                provider=provider,
+                model_name=model_name
+            )
+
+            # If updating, exclude current instance
+            if self.instance:
+                existing = existing.exclude(id=self.instance.id)
+
+            if existing.exists():
+                raise serializers.ValidationError({
+                    'model_name': f'该配置已存在：{provider}/{model_name}'
+                })
+
         # API key is required for all providers
         api_key = data.get('api_key_encrypted') or (
             self.instance.api_key_encrypted if self.instance else None

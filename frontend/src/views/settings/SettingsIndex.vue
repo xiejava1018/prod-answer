@@ -127,7 +127,7 @@ onMounted(async () => {
 async function loadStats() {
   try {
     // Load embedding stats
-    const embeddingRes = await fetch('/api/v1/embeddings/configs/')
+    const embeddingRes = await fetch('/api/v1/configs/')
     const embeddingData = await embeddingRes.json()
     embeddingStats.value = {
       count: embeddingData.count || 0,

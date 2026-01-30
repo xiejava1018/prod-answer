@@ -58,49 +58,49 @@ export const llmConfigApi = {
    * Get all LLM configurations
    */
   list: (params?: { is_active?: boolean; provider?: string }) => {
-    return request.get<{ count: number; providers: LLMModelConfig[] }>('/api/v1/llm/configs/', { params })
+    return request.get<{ count: number; results: LLMModelConfig[] }>('/v1/llm/configs/', { params })
   },
 
   /**
    * Get LLM configuration by ID
    */
   retrieve: (id: string) => {
-    return request.get<LLMModelConfig>(`/api/v1/llm/configs/${id}/`)
+    return request.get<LLMModelConfig>(`/v1/llm/configs/${id}/`)
   },
 
   /**
    * Create new LLM configuration
    */
   create: (data: Partial<LLMModelConfig>) => {
-    return request.post<LLMModelConfig>('/api/v1/llm/configs/', data)
+    return request.post<LLMModelConfig>('/v1/llm/configs/', data)
   },
 
   /**
    * Update LLM configuration
    */
   update: (id: string, data: Partial<LLMModelConfig>) => {
-    return request.put<LLMModelConfig>(`/api/v1/llm/configs/${id}/`, data)
+    return request.put<LLMModelConfig>(`/v1/llm/configs/${id}/`, data)
   },
 
   /**
    * Partial update LLM configuration
    */
   partialUpdate: (id: string, data: Partial<LLMModelConfig>) => {
-    return request.patch<LLMModelConfig>(`/api/v1/llm/configs/${id}/`, data)
+    return request.patch<LLMModelConfig>(`/v1/llm/configs/${id}/`, data)
   },
 
   /**
    * Delete LLM configuration
    */
   delete: (id: string) => {
-    return request.delete(`/api/v1/llm/configs/${id}/`)
+    return request.delete(`/v1/llm/configs/${id}/`)
   },
 
   /**
    * Test LLM connection
    */
   test: (id: string) => {
-    return request.post<LLMTestResult>(`/api/v1/llm/configs/${id}/test/`)
+    return request.post<LLMTestResult>(`/v1/llm/configs/${id}/test/`)
   },
 
   /**
@@ -108,7 +108,7 @@ export const llmConfigApi = {
    */
   setDefault: (id: string) => {
     return request.post<{ status: string; message: string; config: LLMModelConfig }>(
-      `/api/v1/llm/configs/${id}/set_default/`
+      `/v1/llm/configs/${id}/set_default/`
     )
   },
 
@@ -116,14 +116,14 @@ export const llmConfigApi = {
    * Get active providers
    */
   getActiveProviders: () => {
-    return request.get<{ count: number; providers: LLMModelConfig[] }>('/api/v1/llm/active_providers/')
+    return request.get<{ count: number; providers: LLMModelConfig[] }>('/v1/llm/active_providers/')
   },
 
   /**
    * Get default provider
    */
   getDefaultProvider: () => {
-    return request.get<LLMModelConfig>('/api/v1/llm/default_provider/')
+    return request.get<LLMModelConfig>('/v1/llm/default_provider/')
   }
 }
 
@@ -170,35 +170,35 @@ export const llmUsageApi = {
    * Get usage summary
    */
   getSummary: (days: number = 7) => {
-    return request.get<UsageSummary>('/api/v1/llm/usage/summary/', { params: { days } })
+    return request.get<UsageSummary>('/v1/llm/usage/summary/', { params: { days } })
   },
 
   /**
    * Get daily cost
    */
   getDailyCost: (date: string) => {
-    return request.get<DailyCost>('/api/v1/llm/usage/daily/', { params: { date } })
+    return request.get<DailyCost>('/v1/llm/usage/daily/', { params: { date } })
   },
 
   /**
    * Get usage by model
    */
   getByModel: (params?: { provider?: string; model?: string; days?: number }) => {
-    return request.get<{ days: number; count: number; results: ModelStats[] }>('/api/v1/llm/usage/by_model/', { params })
+    return request.get<{ days: number; count: number; results: ModelStats[] }>('/v1/llm/usage/by_model/', { params })
   },
 
   /**
    * Get top costs
    */
   getTopCosts: (limit: number = 20) => {
-    return request.get<any>('/api/v1/llm/usage/top_costs/', { params: { limit } })
+    return request.get<any>('/v1/llm/usage/top_costs/', { params: { limit } })
   },
 
   /**
    * Get errors
    */
   getErrors: (limit: number = 50) => {
-    return request.get<any>('/api/v1/llm/usage/errors/', { params: { limit } })
+    return request.get<any>('/v1/llm/usage/errors/', { params: { limit } })
   }
 }
 
@@ -215,14 +215,14 @@ export const llmAnalysisApi = {
     is_valid?: string
     min_confidence?: number
   }) => {
-    return request.get<{ results: LLMAnalysisResult[]; count: number }>('/api/v1/llm/analysis-results/', { params })
+    return request.get<{ results: LLMAnalysisResult[]; count: number }>('/v1/llm/analysis-results/', { params })
   },
 
   /**
    * Get analysis result by ID
    */
   retrieve: (id: string) => {
-    return request.get<LLMAnalysisResult>(`/api/v1/llm/analysis-results/${id}/`)
+    return request.get<LLMAnalysisResult>(`/v1/llm/analysis-results/${id}/`)
   },
 
   /**
@@ -236,6 +236,6 @@ export const llmAnalysisApi = {
       inconclusive: number
       average_confidence: number
       provider_distribution: Array<{ llm_provider: string; count: number }>
-    }>('/api/v1/llm/analysis-results/stats/')
+    }>('/v1/llm/analysis-results/stats/')
   }
 }
