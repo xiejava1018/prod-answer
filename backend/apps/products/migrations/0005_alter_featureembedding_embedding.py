@@ -11,6 +11,12 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        # 先删除旧的字段，避免类型转换错误
+        migrations.RunSQL(
+            "ALTER TABLE products_featureembedding DROP COLUMN embedding;",
+            "ALTER TABLE products_featureembedding ADD COLUMN embedding jsonb;"
+        ),
+        # 再添加新的字段
         migrations.AlterField(
             model_name='featureembedding',
             name='embedding',
