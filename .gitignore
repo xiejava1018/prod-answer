@@ -109,3 +109,6 @@ backend/alter_vector_dimension.py
 # Temporary files
 nul
 frontend/nul
+backend/.env.bak
+backend/test_export.pdf
+backend/test_export.xlsx
