@@ -93,8 +93,9 @@ class LLMConfigViewSet(viewsets.ModelViewSet):
             # Measure response time
             start_time = time.time()
 
-            # Test connection using provider's test_connection method
-            is_connected = provider.test_connection()
+            # Test connection using provider's test_connection method (async to sync)
+            from asgiref.sync import async_to_sync
+            is_connected = async_to_sync(provider.test_connection)()
 
             end_time = time.time()
             response_time_ms = int((end_time - start_time) * 1000)

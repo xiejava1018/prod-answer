@@ -594,7 +594,8 @@ class EnhancedMatchingService(MatchingService):
                 llm_provider = LLMProviderFactory.get_provider_by_id(llm_config_id)
             else:
                 logger.info("No llm_config_id provided, using default LLM configuration")
-                llm_provider = LLMProviderFactory.get_default_provider()
+                import asyncio
+                llm_provider = asyncio.run(LLMProviderFactory.get_default_provider())
 
             # Get matches for analysis (only matched and partial_matched, skip unmatched to save cost)
             top_matches = MatchRecord.objects.filter(

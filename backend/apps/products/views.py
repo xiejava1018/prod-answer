@@ -6,8 +6,11 @@ from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.permissions import AllowAny
 from django_filters.rest_framework import DjangoFilterBackend
 from django.shortcuts import get_object_or_404
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
 
 from .models import Product, Feature
 from .serializers import (
@@ -213,7 +216,8 @@ class FeatureViewSet(viewsets.ModelViewSet):
         feature.save()
         return Response({'status': 'Feature deleted successfully'}, status=status.HTTP_200_OK)
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], permission_classes=[AllowAny])
+    @method_decorator(csrf_exempt)
     def generate_embedding(self, request, pk=None):
         """
         Generate embedding for a single feature.
@@ -261,7 +265,8 @@ class FeatureViewSet(viewsets.ModelViewSet):
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['post'], permission_classes=[AllowAny])
+    @method_decorator(csrf_exempt)
     def generate_embeddings_batch(self, request):
         """
         Generate embeddings for multiple features.
