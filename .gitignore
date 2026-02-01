@@ -112,3 +112,5 @@ frontend/nul
 backend/.env.bak
 backend/test_export.pdf
 backend/test_export.xlsx
+actions_page.html
+actions_runs.html
