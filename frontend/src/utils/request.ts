@@ -79,7 +79,8 @@ export function put<T = any>(url: string, data?: any): Promise<T> {
 }
 
 export function del<T = any>(url: string, params?: any): Promise<T> {
-  return service.delete<T>(url, { params })
+  const config = params ? { params } : {}
+  return service.delete<T>(url, config)
 }
 
 export function patch<T = any>(url: string, data?: any): Promise<T> {

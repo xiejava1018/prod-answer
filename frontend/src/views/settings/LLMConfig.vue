@@ -1,114 +1,146 @@
 <template>
   <div class="llm-config-container">
-    <el-card class="header-card">
-      <template #header>
-        <div class="card-header">
-          <h2>LLM模型配置管理</h2>
-          <el-button type="primary" @click="showCreateDialog">
-            <el-icon><Plus /></el-icon>
-            添加配置
-          </el-button>
-        </div>
+    <el-page-header @back="$router.back()" class="mb-20">
+      <template #content>
+        LLM模型配置
       </template>
+    </el-page-header>
 
-      <!-- Filter Bar -->
-      <div class="filter-bar">
-        <el-select
-          v-model="filters.provider"
-          placeholder="选择提供商"
-          clearable
-          @change="loadConfigs"
-          style="width: 200px"
-        >
-          <el-option label="OpenAI" value="openai" />
-          <el-option label="ZhipuAI" value="zhipuai" />
-          <el-option label="Qwen" value="qwen" />
-          <el-option label="SiliconFlow" value="siliconflow" />
-        </el-select>
-
-        <el-select
-          v-model="filters.is_active"
-          placeholder="状态"
-          clearable
-          @change="loadConfigs"
-          style="width: 150px"
-        >
-          <el-option label="启用" :value="true" />
-          <el-option label="禁用" :value="false" />
-        </el-select>
-
-        <el-button @click="resetFilters">重置</el-button>
-      </div>
-    </el-card>
-
-    <!-- Config List -->
-    <el-card class="table-card">
-      <el-table :data="configs" v-loading="loading" stripe>
-        <el-table-column prop="provider" label="提供商" width="120">
-          <template #default="{ row }">
-            <el-tag :type="getProviderTagType(row.provider)">
-              {{ getProviderLabel(row.provider) }}
-            </el-tag>
+    <el-row :gutter="20">
+      <!-- Config List -->
+      <el-col :span="16">
+        <el-card class="header-card">
+          <template #header>
+            <div class="card-header">
+              <h2>LLM模型配置管理</h2>
+              <el-button type="primary" @click="showCreateDialog">
+                <el-icon><Plus /></el-icon>
+                添加配置
+              </el-button>
+            </div>
           </template>
-        </el-table-column>
 
-        <el-table-column prop="model_name" label="模型名称" width="200" />
-
-        <el-table-column prop="base_url" label="API地址" show-overflow-tooltip />
-
-        <el-table-column prop="max_tokens" label="最大Token" width="120" align="center" />
-
-        <el-table-column prop="temperature" label="温度" width="100" align="center" />
-
-        <el-table-column label="状态" width="100" align="center">
-          <template #default="{ row }">
-            <el-switch
-              v-model="row.is_active"
-              @change="toggleActive(row)"
-              :loading="row.toggling"
-            />
-          </template>
-        </el-table-column>
-
-        <el-table-column label="默认" width="80" align="center">
-          <template #default="{ row }">
-            <el-tag v-if="row.is_default" type="success" size="small">默认</el-tag>
-            <el-button
-              v-else
-              link
-              type="primary"
-              size="small"
-              @click="setDefaultConfig(row)"
+          <!-- Filter Bar -->
+          <div class="filter-bar">
+            <el-select
+              v-model="filters.provider"
+              placeholder="选择提供商"
+              clearable
+              @change="loadConfigs"
+              style="width: 200px"
             >
-              设为默认
-            </el-button>
-          </template>
-        </el-table-column>
+              <el-option label="OpenAI" value="openai" />
+              <el-option label="ZhipuAI" value="zhipuai" />
+              <el-option label="Qwen" value="qwen" />
+              <el-option label="SiliconFlow" value="siliconflow" />
+            </el-select>
 
-        <el-table-column prop="created_at" label="创建时间" width="180">
-          <template #default="{ row }">
-            {{ formatDate(row.created_at) }}
-          </template>
-        </el-table-column>
+            <el-select
+              v-model="filters.is_active"
+              placeholder="状态"
+              clearable
+              @change="loadConfigs"
+              style="width: 150px"
+            >
+              <el-option label="启用" :value="true" />
+              <el-option label="禁用" :value="false" />
+            </el-select>
 
-        <el-table-column label="操作" width="280" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="primary" @click="testConnection(row)" :loading="row.testing">
-              <el-icon><Connection /></el-icon>
-              测试连接
-            </el-button>
-            <el-button link type="primary" @click="editConfig(row)">
-              <el-icon><Edit /></el-icon>
-              编辑
-            </el-button>
-            <el-button link type="danger" @click="deleteConfig(row)">
-              <el-icon><Delete /></el-icon>
-              删除
-            </el-button>
+            <el-button @click="resetFilters">重置</el-button>
+          </div>
+        </el-card>
+
+        <!-- Config List -->
+        <el-card class="table-card">
+          <el-table :data="configs" v-loading="loading" stripe>
+            <el-table-column prop="provider" label="提供商" width="120">
+              <template #default="{ row }">
+                <el-tag :type="getProviderTagType(row.provider)">
+                  {{ getProviderLabel(row.provider) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+
+            <el-table-column prop="model_name" label="模型名称" width="200" />
+
+            <el-table-column prop="base_url" label="API地址" show-overflow-tooltip />
+
+            <el-table-column prop="max_tokens" label="最大Token" width="120" align="center" />
+
+            <el-table-column prop="temperature" label="温度" width="100" align="center" />
+
+            <el-table-column label="状态" width="120">
+              <template #default="{ row }">
+                <el-tag v-if="row.is_default" type="success">默认</el-tag>
+                <el-tag v-else-if="row.is_active" type="info">活跃</el-tag>
+                <el-tag v-else type="warning">禁用</el-tag>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="操作" width="280" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="testConnection(row)" :loading="row.testing">
+                  <el-icon><Connection /></el-icon>
+                  测试连接
+                </el-button>
+                <el-button
+                  link
+                  type="success"
+                  @click="setDefaultConfig(row)"
+                  :disabled="row.is_default"
+                  size="small"
+                >
+                  设为默认
+                </el-button>
+                <el-button
+                  link
+                  type="info"
+                  @click="toggleActive(row)"
+                  :loading="row.toggling"
+                  size="small"
+                >
+                  {{ row.is_active ? '禁用' : '启用' }}
+                </el-button>
+                <el-button link type="primary" @click="editConfig(row)">
+                  <el-icon><Edit /></el-icon>
+                  编辑
+                </el-button>
+                <el-button link type="danger" @click="deleteConfig(row)">
+                  <el-icon><Delete /></el-icon>
+                  删除
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+      </el-col>
+
+      <!-- System Status -->
+      <el-col :span="8">
+        <el-card class="mb-20">
+          <template #header>
+            <div class="card-header">
+              <span>系统状态</span>
+            </div>
           </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
+
+          <div class="status-list">
+            <div class="status-item">
+              <span class="status-label">默认模型:</span>
+              <el-tag type="success">{{ defaultModel || '未配置' }}</el-tag>
+            </div>
+            <div class="status-item">
+              <span class="status-label">活跃配置:</span>
+              <el-tag type="info">{{ activeConfigsCount }}</el-tag>
+            </div>
+            <div class="status-item">
+              <span class="status-label">总配置数:</span>
+              <el-tag type="info">{{ configs.length }}</el-tag>
+            </div>
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
 
     <!-- Create/Edit Dialog -->
     <el-dialog
@@ -192,7 +224,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { Plus, Edit, Delete, Connection } from '@element-plus/icons-vue'
 import { llmConfigApi, type LLMModelConfig } from '@/api/llm'
@@ -220,6 +252,16 @@ const form = reactive({
   temperature: 0.7,
   is_active: true,
   is_default: false
+})
+
+// Computed properties
+const defaultModel = computed(() => {
+  const defaultConfig = configs.value.find(c => c.is_default)
+  return defaultConfig ? defaultConfig.model_name : ''
+})
+
+const activeConfigsCount = computed(() => {
+  return configs.value.filter(c => c.is_active).length
 })
 
 // Validation rules
@@ -529,5 +571,27 @@ onMounted(() => {
   font-size: 12px;
   color: #909399;
   margin-top: 4px;
+}
+
+.mb-20 {
+  margin-bottom: 20px;
+}
+
+.status-list {
+  .status-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--el-border-color-lighter);
+
+    &:last-child {
+      border-bottom: none;
+    }
+
+    .status-label {
+      font-weight: 500;
+    }
+  }
 }
 </style>

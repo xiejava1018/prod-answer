@@ -116,6 +116,16 @@ class MatchRecordSerializer(serializers.ModelSerializer):
         if hasattr(obj, 'llm_analysis') and obj.llm_analysis:
             from apps.llm.serializers import LLMAnalysisResultSerializer
             return LLMAnalysisResultSerializer(obj.llm_analysis).data
+
+        # Fallback: try to fetch from database if not prefetched
+        try:
+            llm_analysis = obj.llm_analysis
+            if llm_analysis:
+                from apps.llm.serializers import LLMAnalysisResultSerializer
+                return LLMAnalysisResultSerializer(llm_analysis).data
+        except:
+            pass
+
         return None
 
 

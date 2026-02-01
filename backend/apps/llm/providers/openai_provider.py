@@ -100,6 +100,193 @@ class OpenAIProvider(BaseLLMProvider):
         except Exception as e:
             raise RuntimeError(f"OpenAI API call failed: {str(e)}")
 
+    async def analyze_match(
+        self,
+        requirement_text: str,
+        feature_name: str,
+        feature_description: str,
+        similarity_score: float
+    ) -> Dict[str, Any]:
+        """
+        Analyze a single requirement-feature match using OpenAI.
+
+        Args:
+            requirement_text: User requirement text
+            feature_name: Feature name
+            feature_description: Feature description
+            similarity_score: Vector similarity score
+
+        Returns:
+            Dictionary with:
+                - is_valid_match: bool
+                - confidence_score: float
+                - match_reason: str
+                - keywords_from_requirement: list
+                - keywords_from_feature: list
+                - similarity_assessment: str
+                - suggested_status: str
+                - tokens_used: dict
+                - estimated_cost: dict
+        """
+        from ..prompts import SingleMatchAnalysisPrompts
+
+        # Sanitize inputs
+        requirement_text = self.sanitize_input(requirement_text)
+        feature_description = self.sanitize_input(feature_description)
+
+        # Prepare prompts
+        system_prompt = SingleMatchAnalysisPrompts.SYSTEM_PROMPT
+        user_prompt = SingleMatchAnalysisPrompts.format_user_prompt(
+            requirement_text=requirement_text,
+            feature_name=feature_name,
+            feature_description=feature_description,
+            similarity_score=similarity_score
+        )
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+
+        try:
+            # Call API with JSON response format
+            response = await self._call_api(messages, response_format={"type": "json_object"})
+
+            # Parse response
+            content = response.choices[0].message.content
+            result = json.loads(content)
+
+            # Add metadata
+            result['tokens_used'] = {
+                'prompt_tokens': response.usage.prompt_tokens,
+                'completion_tokens': response.usage.completion_tokens,
+                'total_tokens': response.usage.total_tokens,
+            }
+
+            # Estimate cost
+            cost = self.estimate_cost(
+                response.usage.prompt_tokens,
+                response.usage.completion_tokens
+            )
+            result['estimated_cost'] = cost
+
+            # Validate response
+            template = SingleMatchAnalysisPrompts.get_prompt_template()
+            if not template.validate_output(result):
+                raise ValueError("LLM response validation failed: missing required fields")
+
+            return result
+
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Failed to parse LLM response as JSON: {str(e)}")
+        except Exception as e:
+            raise RuntimeError(f"OpenAI single match analysis failed: {str(e)}")
+
+    async def analyze_matches_batch(
+        self,
+        matches_data: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        Batch analyze multiple requirement-feature matches in a single API call.
+
+        This is MUCH more efficient than calling analyze_match() multiple times:
+        - Single API call instead of N calls
+        - Better context understanding
+        - Reduced network latency
+        - Lower cost (fewer prompt tokens overhead)
+
+        Args:
+            matches_data: List of dictionaries, each containing:
+                - requirement_text: str
+                - feature_name: str
+                - feature_description: str
+                - similarity_score: float
+
+        Returns:
+            Dictionary with:
+                - results: list of analysis results for each match
+                - total_analyzed: int
+                - tokens_used: dict
+                - estimated_cost: dict
+        """
+        from ..prompts import BatchMatchAnalysisPrompts
+
+        # Prepare batch prompt
+        system_prompt = BatchMatchAnalysisPrompts.SYSTEM_PROMPT
+        user_prompt = BatchMatchAnalysisPrompts.format_user_prompt(matches_data)
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+
+        try:
+            # Call API with JSON response format
+            response = await self._call_api(messages, response_format={"type": "json_object"})
+
+            # Parse response
+            content = response.choices[0].message.content
+
+            # Try to extract JSON from response (in case there's extra text)
+            import re
+            json_match = re.search(r'\{[\s\S]*\}', content)
+            if json_match:
+                content = json_match.group(0)
+
+            result = json.loads(content)
+
+            # Add metadata
+            result['tokens_used'] = {
+                'prompt_tokens': response.usage.prompt_tokens,
+                'completion_tokens': response.usage.completion_tokens,
+                'total_tokens': response.usage.total_tokens,
+            }
+
+            # Estimate cost
+            cost = self.estimate_cost(
+                response.usage.prompt_tokens,
+                response.usage.completion_tokens
+            )
+            result['estimated_cost'] = cost
+
+            # Validate response
+            if 'results' not in result:
+                raise ValueError("LLM response missing 'results' field")
+
+            # Allow small tolerance in result count (LLM might make minor mistakes)
+            result_count = len(result.get('results', []))
+            expected_count = len(matches_data)
+            if abs(result_count - expected_count) > 2:
+                raise ValueError(
+                    f"LLM returned {result_count} results, "
+                    f"expected {expected_count} (tolerance exceeded)"
+                )
+
+            # Log warning if counts don't match exactly
+            if result_count != expected_count:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(
+                    f"LLM returned {result_count} results, expected {expected_count}. "
+                    f"Using available results (tolerance within limit)."
+                )
+
+            # Index results by match_index for easy lookup
+            indexed_results = {}
+            for r in result['results']:
+                idx = r.get('match_index')
+                if idx is not None:
+                    indexed_results[idx] = r
+
+            result['indexed_results'] = indexed_results
+
+            return result
+
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Failed to parse LLM response as JSON: {str(e)}")
+        except Exception as e:
+            raise ValueError(f"Batch LLM analysis failed: {str(e)}")
+
     async def analyze_matches(
         self,
         requirement: str,

@@ -148,7 +148,28 @@
             <el-form-item label="LLM增强分析">
               <el-switch v-model="enableLLMAnalysis" />
               <div class="form-tip">
-                启用 fanc后将使用LLM进行智能语义分析，提高匹配准确度
+                启用后将使用LLM进行智能语义分析，提高匹配准确度
+              </div>
+            </el-form-item>
+
+            <el-form-item label="异步处理" v-if="enableLLMAnalysis">
+              <el-switch v-model="asyncMode" />
+              <div class="form-tip">
+                异步模式在后台处理，适合大数据量需求（推荐）。
+                <br>
+                同步模式会等待分析完成（可能较长时间）。
+              </div>
+            </el-form-item>
+
+            <el-form-item label="分析模式" v-if="enableLLMAnalysis">
+              <el-radio-group v-model="analysisMode">
+                <el-radio-button label="full">完整模式</el-radio-button>
+                <el-radio-button label="quick">快速模式</el-radio-button>
+              </el-radio-group>
+              <div class="form-tip">
+                完整模式：深度分析，准确度高，成本较高（~1000 tokens/match）
+                <br>
+                快速模式：基础分析，速度快，成本较低（~500 tokens/match）
               </div>
             </el-form-item>
 
@@ -371,6 +392,14 @@ function handleRequirementChange() {
   analysisResult.value = null
 }
 
+const asyncMode = ref(false)
+const analysisMode = ref<'full' | 'quick'>('full')
+const taskStatus = ref<{
+  taskId: string
+  status: string
+  progress: number
+} | null>(null)
+
 async function handleAnalyze() {
   if (!selectedRequirementId.value) {
     ElMessage.warning('请先选择需求')
@@ -378,43 +407,100 @@ async function handleAnalyze() {
   }
 
   analyzing.value = true
+  analysisResult.value = null
+
   try {
     let result
-    if (enableLLMAnalysis.value) {
-      // 使用LLM增强分析
+    const mode = enableLLMAnalysis.value ? 'LLM增强' : '向量化'
+
+    if (enableLLMAnalysis.value && asyncMode.value) {
+      // 异步 LLM 分析
+      ElMessage.info('启动LLM异步分析任务...')
+
+      const taskResponse = await matchingStore.analyzeAsync(
+        selectedRequirementId.value,
+        threshold.value,
+        undefined, // llm_config_id
+        analysisMode.value
+      )
+
+      taskStatus.value = {
+        taskId: taskResponse.task_id,
+        status: taskResponse.status,
+        progress: 0
+      }
+
+      ElMessage.success(`分析任务已启动（任务ID: ${taskResponse.task_id}）`)
+
+      // 轮询任务状态
+      ElMessage.info('正在处理LLM分析，请稍候...')
+
+      result = await matchingStore.pollTaskStatus(taskResponse.task_id)
+
+      taskStatus.value = null
+      analysisResult.value = result
+
+      // 显示完成消息
+      const matchCount = result.total_matches || 0
+      const itemCount = result.total_items || 0
+      const llmTime = result.llm_analysis_time?.toFixed(1) || 'N/A'
+
+      ElMessage.success({
+        message: `${mode}异步分析完成！共 ${itemCount} 个需求项，匹配到 ${matchCount} 个结果（LLM耗时: ${llmTime}秒）`,
+        duration: 3000,
+        onClose: () => {
+          handleViewResults()
+        }
+      })
+
+    } else if (enableLLMAnalysis.value) {
+      // 同步 LLM 分析
+      ElMessage.info('使用LLM增强分析中...')
+
       result = await matchingStore.analyzeEnhanced(
         selectedRequirementId.value,
         threshold.value,
-        undefined, // llm_config_id (使用默认配置)
-        'full' as 'full' | 'quick' // llm_analysis_mode
+        undefined,
+        analysisMode.value
       )
-      ElMessage.info('使用LLM增强分析中...')
+
+      analysisResult.value = result
+
+      const matchCount = result.total_matches || 0
+      const itemCount = result.total_items || 0
+
+      ElMessage.success({
+        message: `${mode}匹配分析完成！共 ${itemCount} 个需求项，匹配到 ${matchCount} 个结果`,
+        duration: 2000,
+        onClose: () => {
+          handleViewResults()
+        }
+      })
+
     } else {
-      // 使用基础向量化匹配
+      // 基础向量化匹配
       result = await matchingStore.analyzeMatch(
         selectedRequirementId.value,
         threshold.value
       )
+
+      analysisResult.value = result
+
+      const matchCount = result.total_matches || 0
+      const itemCount = result.total_items || 0
+
+      ElMessage.success({
+        message: `${mode}匹配分析完成！共 ${itemCount} 个需求项，匹配到 ${matchCount} 个结果`,
+        duration: 2000,
+        onClose: () => {
+          handleViewResults()
+        }
+      })
     }
-
-    analysisResult.value = result
-
-    // result 直接就是 summary 对象，包含 total_items, total_matches 等字段
-    const matchCount = result.total_matches || 0
-    const itemCount = result.total_items || 0
-
-    const mode = enableLLMAnalysis.value ? 'LLM增强' : '向量化'
-    ElMessage.success({
-      message: `${mode}匹配分析完成！共 ${itemCount} 个需求项，匹配到 ${matchCount} 个结果`,
-      duration: 2000,
-      onClose: () => {
-        // 自动跳转到结果详情页
-        handleViewResults()
-      }
-    })
   } catch (error: any) {
     console.error('Matching error:', error)
-    ElMessage.error(error.response?.data?.error || '匹配分析失败')
+    ElMessage.error(error.response?.data?.error || error.message || '匹配分析失败')
+    taskStatus.value = null
   } finally {
     analyzing.value = false
   }
@@ -465,11 +551,15 @@ async function startBatchAnalysis() {
   try {
     // Initialize batch progress
     batchStartTime.value = new Date().toISOString()
-    batchProgressItems.value = selectedBatchIds.value.map(id => ({
-      requirement_id: id,
-      requirement_name: requirements.value.find(r => r.id === id)?.title,
-      status: 'pending'
-    }))
+    batchProgressItems.value = selectedBatchIds.value.map(id => {
+      const req = requirements.value.find(r => r.id === id)
+      return {
+        requirement_id: id,
+        requirement_name: req?.title || req?.source_file_name || 'Unknown',
+        status: 'pending',
+        progress: 0
+      }
+    })
 
     showBatchConfig.value = false
     showBatchProgress.value = true
@@ -485,21 +575,27 @@ async function startBatchAnalysis() {
       const reqId = selectedBatchIds.value[i]
 
       // Update status to processing
-      batchProgressItems.value[i].status = 'processing'
-      batchProgressItems.value[i].progress = 0
+      if (batchProgressItems.value[i]) {
+        batchProgressItems.value[i].status = 'processing'
+        batchProgressItems.value[i].progress = 0
+      }
 
       try {
         // Analyze requirement
         await matchingStore.analyzeMatch(reqId, batchConfig.value.threshold)
 
         // Update status to success
-        batchProgressItems.value[i].status = 'success'
-        batchProgressItems.value[i].progress = 100
-        batchProgressItems.value[i].matches_count = Math.floor(Math.random() * 20) + 5 // Mock data
+        if (batchProgressItems.value[i]) {
+          batchProgressItems.value[i].status = 'success'
+          batchProgressItems.value[i].progress = 100
+          batchProgressItems.value[i].matches_count = Math.floor(Math.random() * 20) + 5 // Mock data
+        }
       } catch (error) {
         // Update status to failed
-        batchProgressItems.value[i].status = 'failed'
-        batchProgressItems.value[i].error = '分析失败'
+        if (batchProgressItems.value[i]) {
+          batchProgressItems.value[i].status = 'failed'
+          batchProgressItems.value[i].error = '分析失败'
+        }
       }
     }
 
@@ -517,6 +613,10 @@ function handleBatchProgressClose() {
 }
 
 function handleViewBatchResult(item: any) {
+  if (!item || !item.requirement_id) {
+    ElMessage.error('无效的需求ID')
+    return
+  }
   router.push(`/matching/results/${item.requirement_id}`)
 }
 

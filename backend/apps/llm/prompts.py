@@ -297,6 +297,114 @@ class SummaryPrompts:
 请生成一份2-3句话的执行摘要，突出最重要的发现和建议。"""
 
 
+class BatchMatchAnalysisPrompts:
+    """
+    Prompt templates for batch analyzing multiple requirement-feature matches at once.
+
+    This approach is much more efficient than analyzing matches one by one:
+    - Single API call instead of N calls
+    - Better context understanding
+    - Reduced network latency
+    """
+
+    SYSTEM_PROMPT = """你是一个专业的产品能力匹配分析专家。你的任务是批量分析多个用户需求与产品特征的匹配关系。
+
+分析要求：
+1. 准确判断每个需求项与特征的匹配程度
+2. 提取匹配的关键词（从需求和特征中各提取3-5个）
+3. 说明匹配的理由（基于需求的具体要求和特征的实际能力）
+4. 给出置信度评分（0.0-1.0）
+
+评估标准：
+- 完全匹配 (similarity >= 0.85): 特征完全满足需求，置信度 >= 0.8
+- 部分匹配 (0.75 <= similarity < 0.85): 特征部分满足需求，置信度 0.5-0.8
+- 不匹配 (similarity < 0.75): 特征不满足需求，置信度 < 0.5
+
+请始终以JSON格式返回分析结果。"""
+
+    USER_PROMPT_TEMPLATE = """请批量分析以下用户需求项与产品特征的匹配关系：
+
+【待分析的对列表】
+共 {match_count} 个需求-特征对需要分析：
+
+{matches_list}
+
+【分析要求】
+对于每一对，请分析：
+1. is_valid_match: 是否为有效匹配（true/false）
+2. confidence_score: 置信度评分（0.0-1.0）
+3. match_reason: 匹配理由（1-2句话解释为什么匹配或不匹配）
+4. keywords_from_requirement: 从需求中提取的关键词（3-5个）
+5. keywords_from_feature: 从特征中提取的关键词（3-5个）
+
+【返回格式】
+请返回JSON格式的分析结果：
+{{
+    "results": [
+        {{
+            "match_index": 0,
+            "is_valid_match": true,
+            "confidence_score": 0.85,
+            "match_reason": "需求要求支持X功能，特征明确提供了X功能支持...",
+            "keywords_from_requirement": ["关键词1", "关键词2", "关键词3"],
+            "keywords_from_feature": ["关键词1", "关键词2", "关键词3"]
+        }},
+        {{
+            "match_index": 1,
+            "is_valid_match": false,
+            "confidence_score": 0.3,
+            "match_reason": "需求要求X功能，但特征只提供Y功能，无法满足...",
+            "keywords_from_requirement": ["关键词1", "关键词2"],
+            "keywords_from_feature": ["关键词1", "关键词2"]
+        }}
+    ],
+    "total_analyzed": {match_count}
+}}
+
+注意：
+- match_index 必须与输入的序号对应（0到{match_count}-1）
+- 如果 similarity >= 0.85，通常 is_valid_match 应为 true，confidence_score >= 0.8
+- 如果 0.75 <= similarity < 0.85，通常 is_valid_match 应为 true，confidence_score 0.5-0.8
+- 如果 similarity < 0.75，通常 is_valid_match 应为 false，confidence_score < 0.5
+- 关键词必须是文本中实际出现的词，不要编造
+- 匹配理由要具体，不要泛泛而谈"""
+
+    @staticmethod
+    def format_user_prompt(matches_data: list) -> str:
+        """
+        Format user prompt with batch match data.
+
+        Args:
+            matches_data: List of dictionaries containing:
+                - requirement_text: str
+                - feature_name: str
+                - feature_description: str
+                - similarity_score: float
+
+        Returns:
+            Formatted prompt string
+        """
+        matches_list = []
+        for idx, match in enumerate(matches_data):
+            req_text = match.get('requirement_text', '')[:200]  # Truncate long text
+            feature_name = match.get('feature_name', '')
+            feature_desc = match.get('feature_description', '')[:200]
+            similarity = match.get('similarity_score', 0.0)
+
+            matches_list.append(f"""【对 {idx}】
+需求：{req_text}
+特征名称：{feature_name}
+特征描述：{feature_desc}
+向量相似度：{similarity:.3f}""")
+
+        matches_text = "\n\n".join(matches_list)
+
+        return BatchMatchAnalysisPrompts.USER_PROMPT_TEMPLATE.format(
+            match_count=len(matches_data),
+            matches_list=matches_text
+        )
+
+
 # =============================================================================
 # PHASE 2: Enhanced Prompt Templates with Versioning and A/B Testing
 # =============================================================================
@@ -629,7 +737,7 @@ class EnhancedMatchAnalysisPrompts:
 
         output_schema_quick = {
             "type": "object",
-            "required": ["match_details", "total_valid_matches"],
+            "required": ["match_details"],
             "properties": {
                 "match_details": {
                     "type": "array",
@@ -840,4 +948,136 @@ class MismatchDetectionPrompts:
             user_prompt_template=MismatchDetectionPrompts.USER_PROMPT_TEMPLATE,
             output_schema=output_schema,
             metadata={"description": "Detect false positive matches", "target_tokens": 800}
+        )
+
+
+class SingleMatchAnalysisPrompts:
+    """
+    Prompt templates for analyzing a single requirement-feature match.
+
+    Used by EnhancedMatchingService to analyze individual matches
+    and extract keywords, confidence scores, and validation results.
+    """
+
+    SYSTEM_PROMPT = """你是一个专业的产品能力匹配分析专家。你的任务是深入分析单个用户需求与产品特征的匹配关系。
+
+你需要评估：
+1. 匹配的正确性：特征是否真正满足需求
+2. 匹配的质量：是完全满足、部分满足还是不满足
+3. 置信度评估：向量相似度是否反映真实匹配程度
+4. 关键词提取：从需求和特征中提取对应的关键词
+
+请始终返回严格的JSON格式结果，不要包含任何额外文字说明。"""
+
+    USER_PROMPT_TEMPLATE = """请分析以下用户需求与产品特征的匹配关系：
+
+【用户需求】
+{requirement_text}
+
+【产品特征】
+特征名称：{feature_name}
+特征描述：{feature_description}
+
+【向量相似度】
+{similarity_score:.3f}
+
+请进行详细分析并返回JSON格式结果：
+
+{{
+    "is_valid_match": true/false,
+    "confidence_score": 0.0-1.0,
+    "match_reason": "详细说明为什么匹配或不匹配，引用具体内容",
+    "keywords_from_requirement": ["关键词1", "关键词2", "关键词3"],
+    "keywords_from_feature": ["关键词1", "关键词2", "关键词3"],
+    "similarity_assessment": "向量相似度是否合理（合理/偏高/偏低/严重偏高/严重偏低）",
+    "suggested_status": "matched/partial_matched/unmatched"
+}}
+
+评估标准：
+- is_valid_match: 综合考虑语义和实际功能，判断是否为真实匹配
+- confidence_score: 0.0-1.0，表示对判断的确信程度
+- match_reason: 详细说明判断理由，引用需求和特征中的具体内容，至少50字
+- keywords_from_requirement: 需求中的关键技术词、功能词、指标词（3-5个）
+- keywords_from_feature: 特征描述中的对应关键词（3-5个）
+- similarity_assessment: 评估向量相似度是否准确反映了匹配程度
+- suggested_status: 根据你的分析，建议的正确匹配状态
+
+判断原则：
+1. 完全匹配 (matched): 特征完全满足需求的所有核心功能
+2. 部分匹配 (partial_matched): 特征满足部分需求或需要额外配置
+3. 不匹配 (unmatched): 特征与需求功能不同或领域不相关
+
+请确保分析客观、准确、具体。"""
+
+    @staticmethod
+    def format_user_prompt(
+        requirement_text: str,
+        feature_name: str,
+        feature_description: str,
+        similarity_score: float
+    ) -> str:
+        """
+        Format user prompt for single match analysis.
+
+        Args:
+            requirement_text: User requirement text
+            feature_name: Feature name
+            feature_description: Feature description
+            similarity_score: Vector similarity score
+
+        Returns:
+            Formatted user prompt string
+        """
+        return SingleMatchAnalysisPrompts.USER_PROMPT_TEMPLATE.format(
+            requirement_text=requirement_text,
+            feature_name=feature_name,
+            feature_description=feature_description,
+            similarity_score=similarity_score
+        )
+
+    @staticmethod
+    def get_prompt_template() -> PromptTemplate:
+        """Get PromptTemplate instance for single match analysis."""
+        output_schema = {
+            "type": "object",
+            "required": ["is_valid_match", "confidence_score", "match_reason",
+                        "keywords_from_requirement", "keywords_from_feature"],
+            "properties": {
+                "is_valid_match": {"type": "boolean"},
+                "confidence_score": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "match_reason": {"type": "string"},
+                "keywords_from_requirement": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                    "maxItems": 10
+                },
+                "keywords_from_feature": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                    "maxItems": 10
+                },
+                "similarity_assessment": {
+                    "type": "string",
+                    "enum": ["合理", "偏高", "偏低", "严重偏高", "严重偏低"]
+                },
+                "suggested_status": {
+                    "type": "string",
+                    "enum": ["matched", "partial_matched", "unmatched"]
+                }
+            }
+        }
+
+        return PromptTemplate(
+            name="single_match_analysis",
+            version="1.0",
+            variant_name="A",
+            system_prompt=SingleMatchAnalysisPrompts.SYSTEM_PROMPT,
+            user_prompt_template=SingleMatchAnalysisPrompts.USER_PROMPT_TEMPLATE,
+            output_schema=output_schema,
+            metadata={
+                "description": "Analyze individual requirement-feature match",
+                "target_tokens": 1000
+            }
         )

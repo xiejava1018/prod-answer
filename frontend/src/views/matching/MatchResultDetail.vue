@@ -86,18 +86,24 @@
           <el-table-column prop="requirement_item_text" label="需求规格" min-width="300">
             <template #default="{ row }">
               <div class="requirement-text-with-highlight">
-                <span v-html="highlightKeywords(row.requirement_item_text, row.matches?.[0]?.keywords_from_requirement)"></span>
+                <span v-html="highlightKeywords(row.requirement_item_text, row.matches?.[0]?.llm_analysis?.keywords_from_requirement)"></span>
               </div>
             </template>
           </el-table-column>
           <el-table-column label="需求规格满足度" width="150" align="center">
             <template #default="{ row }">
-              <el-tag
-                :type="getSatisfactionType(row.match_status)"
-                size="large"
-              >
-                {{ getSatisfactionText(row.match_status) }}
-              </el-tag>
+              <div class="satisfaction-tags">
+                <el-tag
+                  :type="getSatisfactionType(row.match_status)"
+                  size="large"
+                  class="status-tag"
+                >
+                  {{ getSatisfactionText(row.match_status) }}
+                </el-tag>
+                <el-tag v-if="row.matches?.[0]?.is_llm_corrected" type="warning" size="small" class="correction-tag">
+                  LLM已修正
+                </el-tag>
+              </div>
             </template>
           </el-table-column>
           <el-table-column label="规格满足度详细描述" min-width="500">
@@ -115,6 +121,9 @@
                       size="small"
                     >
                       相似度: {{ (match.similarity_score * 100).toFixed(1) }}%
+                    </el-tag>
+                    <el-tag v-if="match.final_confidence" type="primary" size="small" class="ml-10">
+                      融合置信度: {{ (match.final_confidence * 100).toFixed(1) }}%
                     </el-tag>
                     <el-tag type="info" size="small" class="ml-10">
                       排名: {{ match.rank }}
@@ -135,6 +144,50 @@
                     <div v-if="match.product_name" class="product-info">
                       <span class="label">产品:</span>
                       <span class="value">{{ match.product_name }}</span>
+                    </div>
+                    <!-- LLM 分析结果 -->
+                    <div v-if="match.llm_analysis" class="llm-analysis">
+                      <div class="llm-analysis-header">
+                        <el-divider content-position="left">
+                          <el-icon><ChatDotRound /></el-icon>
+                          LLM 增强分析
+                        </el-divider>
+                      </div>
+                      <div class="llm-analysis-content">
+                        <div v-if="match.llm_analysis.match_reason" class="analysis-reason">
+                          <span class="label">匹配理由:</span>
+                          <span class="value">{{ match.llm_analysis.match_reason }}</span>
+                        </div>
+                        <div v-if="match.llm_analysis.keywords_from_feature && match.llm_analysis.keywords_from_feature.length > 0" class="feature-keywords">
+                          <span class="label">特征关键词:</span>
+                          <el-tag
+                            v-for="(keyword, kidx) in match.llm_analysis.keywords_from_feature"
+                            :key="kidx"
+                            size="small"
+                            class="keyword-tag"
+                          >
+                            {{ keyword }}
+                          </el-tag>
+                        </div>
+                        <div v-if="match.llm_analysis.is_valid_match !== undefined" class="validation-result">
+                          <span class="label">LLM验证:</span>
+                          <el-tag :type="match.llm_analysis.is_valid_match ? 'success' : 'danger'" size="small">
+                            {{ match.llm_analysis.is_valid_match ? '✓ 有效匹配' : '✗ 无效匹配' }}
+                          </el-tag>
+                          <span class="confidence-score">置信度: {{ (match.llm_analysis.confidence_score * 100).toFixed(1) }}%</span>
+                        </div>
+                        <div v-if="match.is_llm_corrected" class="correction-notice">
+                          <el-alert
+                            :type="getSatisfactionType(row.match_status)"
+                            :closable="false"
+                            show-icon
+                          >
+                            <template #title>
+                              LLM 修正了匹配状态: {{ getSatisfactionText(match.original_match_status) }} → {{ getSatisfactionText(row.match_status) }}
+                            </template>
+                          </el-alert>
+                        </div>
+                      </div>
                     </div>
                   </div>
                   <el-divider v-if="index < (row.matches?.length || 1) - 1" />
@@ -230,7 +283,8 @@ import {
   TrendCharts,
   Top,
   Bottom,
-  Download
+  Download,
+  ChatDotRound
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
@@ -525,5 +579,86 @@ function handleExport() {
 
 .requirement-text-with-highlight {
   line-height: 1.8;
+}
+
+// LLM 分析样式
+.satisfaction-tags {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+
+.correction-tag {
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.llm-analysis {
+  margin-top: 16px;
+  padding: 12px;
+  background-color: #f8f9fa;
+  border-radius: 6px;
+  border: 1px solid #e9ecef;
+}
+
+.llm-analysis-header {
+  margin-bottom: 12px;
+}
+
+.llm-analysis-content {
+  .analysis-reason,
+  .feature-keywords,
+  .validation-result {
+    margin-bottom: 10px;
+    padding: 8px;
+    background-color: #ffffff;
+    border-radius: 4px;
+    border-left: 3px solid #409eff;
+
+    .label {
+      font-weight: 600;
+      color: #606266;
+      margin-right: 8px;
+    }
+
+    .value {
+      color: #303133;
+    }
+  }
+
+  .feature-keywords {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .keyword-tag {
+    margin: 0;
+  }
+
+  .validation-result {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .confidence-score {
+    color: #67c23a;
+    font-weight: 600;
+  }
+
+  .correction-notice {
+    margin-top: 10px;
+  }
 }
 </style>

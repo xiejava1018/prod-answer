@@ -311,6 +311,83 @@ class MatchingViewSet(viewsets.ViewSet):
             'task_id': task_id
         }, status=status.HTTP_501_NOT_IMPLEMENTED)
 
+    @action(detail=False, methods=['post'], url_path='analyze-async', permission_classes=[AllowAny])
+    def analyze_async(self, request):
+        """
+        Perform LLM enhanced matching in background (async mode).
+
+        POST /api/v1/matching/analyze-async/
+        Body: {
+            requirement_id,
+            threshold?,
+            llm_config_id?,
+            llm_analysis_mode?
+        }
+
+        Returns:
+            Response with task_id for tracking
+        """
+        from .task_service import BackgroundTaskService
+
+        requirement_id = request.data.get('requirement_id')
+        threshold = request.data.get('threshold', 0.75)
+        llm_config_id = request.data.get('llm_config_id')
+        llm_analysis_mode = request.data.get('llm_analysis_mode', 'full')
+
+        if not requirement_id:
+            return Response({
+                'error': 'requirement_id is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            # Validate requirement exists
+            from .models import CapabilityRequirement
+            if not CapabilityRequirement.objects.filter(id=requirement_id).exists():
+                return Response({
+                    'error': 'Requirement not found'
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            # Start background task
+            task_id = BackgroundTaskService.run_llm_analysis_task(
+                requirement_id=requirement_id,
+                llm_config_id=llm_config_id,
+                llm_analysis_mode=llm_analysis_mode,
+                threshold=threshold
+            )
+
+            return Response({
+                'task_id': task_id,
+                'status': 'pending',
+                'message': 'LLM analysis started in background',
+                'poll_url': f'/api/v1/matching/task-status/{task_id}/'
+            }, status=status.HTTP_202_ACCEPTED)
+
+        except Exception as e:
+            logger.error(f"Failed to start async analysis: {e}", exc_info=True)
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['get'], url_path='task-status/(?P<task_id>[^/.]+)', permission_classes=[AllowAny])
+    def task_status(self, request, task_id=None):
+        """
+        Get background task status.
+
+        GET /api/v1/matching/task-status/{task_id}/
+
+        Returns task status and result if completed
+        """
+        from .task_service import BackgroundTaskService
+
+        task_data = BackgroundTaskService.get_task_status(task_id)
+
+        if not task_data:
+            return Response({
+                'error': 'Task not found or expired'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        return Response(task_data)
+
     @action(detail=False, methods=['post'], url_path='export/(?P<requirement_id>[^/.]+)', permission_classes=[AllowAny])
     def export(self, request, requirement_id=None):
         """
@@ -379,6 +456,20 @@ class RequirementViewSet(viewsets.ModelViewSet):
 
     queryset = CapabilityRequirement.objects.all()
     filterset_fields = ['status', 'requirement_type']
+
+    def perform_destroy(self, instance):
+        """Override to add logging before deletion."""
+        logger.info(f"Deleting requirement: {instance.title} (ID: {instance.id})")
+
+        # Get counts of related objects before deletion
+        items_count = instance.items.count()
+        matches_count = instance.matches.count()
+        logger.info(f"Related objects: {items_count} items, {matches_count} matches")
+
+        # Call parent to perform actual deletion
+        super().perform_destroy(instance)
+
+        logger.info("Requirement deleted successfully")
 
     def get_serializer_class(self):
         """Return appropriate serializer based on action."""

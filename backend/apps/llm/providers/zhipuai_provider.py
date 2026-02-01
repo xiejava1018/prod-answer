@@ -109,6 +109,80 @@ class ZhipuAIProvider(BaseLLMProvider):
         except aiohttp.ClientError as e:
             raise RuntimeError(f"ZhipuAI API call failed: {str(e)}")
 
+    async def analyze_match(
+        self,
+        requirement_text: str,
+        feature_name: str,
+        feature_description: str,
+        similarity_score: float
+    ) -> Dict[str, Any]:
+        """
+        Analyze a single requirement-feature match using ZhipuAI.
+
+        Args:
+            requirement_text: User requirement text
+            feature_name: Feature name
+            feature_description: Feature description
+            similarity_score: Vector similarity score
+
+        Returns:
+            Dictionary with match analysis results
+        """
+        from ..prompts import SingleMatchAnalysisPrompts
+
+        # Sanitize inputs
+        requirement_text = self.sanitize_input(requirement_text)
+        feature_description = self.sanitize_input(feature_description)
+
+        # Prepare prompts
+        system_prompt = SingleMatchAnalysisPrompts.SYSTEM_PROMPT
+        user_prompt = SingleMatchAnalysisPrompts.format_user_prompt(
+            requirement_text=requirement_text,
+            feature_name=feature_name,
+            feature_description=feature_description,
+            similarity_score=similarity_score
+        )
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+
+        try:
+            # Call API
+            response = await self._call_api(messages)
+
+            # Parse response
+            content = response['choices'][0]['message']['content']
+            result = json.loads(content)
+
+            # Add metadata
+            usage = response.get('usage', {})
+            result['tokens_used'] = {
+                'prompt_tokens': usage.get('prompt_tokens', 0),
+                'completion_tokens': usage.get('completion_tokens', 0),
+                'total_tokens': usage.get('total_tokens', 0),
+            }
+
+            # Estimate cost (convert CNY to USD)
+            cost = self.estimate_cost(
+                usage.get('prompt_tokens', 0),
+                usage.get('completion_tokens', 0)
+            )
+            result['estimated_cost'] = cost
+
+            # Validate response
+            template = SingleMatchAnalysisPrompts.get_prompt_template()
+            if not template.validate_output(result):
+                raise ValueError("LLM response validation failed: missing required fields")
+
+            return result
+
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Failed to parse LLM response as JSON: {str(e)}")
+        except Exception as e:
+            raise RuntimeError(f"ZhipuAI single match analysis failed: {str(e)}")
+
     async def analyze_matches(
         self,
         requirement: str,

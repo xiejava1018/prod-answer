@@ -279,8 +279,10 @@ const handleGoToMatchingFromDialog = () => {
 // 删除需求
 const deleteRequirement = async (row: any) => {
   try {
+    console.log('[删除需求] 开始删除:', row.title, 'ID:', row.id)
+
     await ElMessageBox.confirm(
-      '确定要删除这个需求吗？',
+      `确定要删除需求「${row.title}」吗？`,
       '确认删除',
       {
         confirmButtonText: '确定',
@@ -289,12 +291,17 @@ const deleteRequirement = async (row: any) => {
       }
     )
 
-    await matchingApi.deleteRequirement(row.id)
+    console.log('[删除需求] 用户确认删除，调用 API...')
+    const response = await matchingApi.deleteRequirement(row.id)
+    console.log('[删除需求] 删除成功，响应:', response)
+
     ElMessage.success('删除成功')
     fetchRequirements()
   } catch (error: any) {
+    console.error('[删除需求] 删除失败:', error)
+
     if (error !== 'cancel') {
-      ElMessage.error(error.response?.data?.detail || '删除失败')
+      ElMessage.error(error.response?.data?.detail || error.message || '删除失败')
     }
   }
 }

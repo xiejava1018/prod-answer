@@ -139,7 +139,7 @@ async function loadStats() {
     const llmData = await llmRes.json()
     llmStats.value = {
       count: llmData.count || 0,
-      active: llmData.providers?.filter((r: any) => r.is_active).length || 0
+      active: llmData.results?.filter((r: any) => r.is_active).length || 0
     }
 
     // Load cost stats

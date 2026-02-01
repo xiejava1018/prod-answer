@@ -196,7 +196,7 @@ const cacheHitRateColor = computed(() => {
 // Methods
 const loadSummary = async () => {
   try {
-    const { data } = await llmUsageApi.getSummary(daysFilter.value)
+    const data = await llmUsageApi.getSummary(daysFilter.value)
     Object.assign(summary, data)
     await nextTick()
     renderChart()

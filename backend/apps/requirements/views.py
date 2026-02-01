@@ -4,13 +4,18 @@ API views for Requirements management.
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.permissions import AllowAny
 from rest_framework.parsers import MultiPartParser, FormParser
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
+from django.db import transaction
 
 from .models import CapabilityRequirement
 from .serializers import RequirementUploadSerializer
 from .services import FileParserService, RequirementService
 
 
+@method_decorator(csrf_exempt, name='dispatch')
 class RequirementUploadViewSet(viewsets.ViewSet):
     """
     ViewSet for requirement file uploads.
@@ -20,6 +25,10 @@ class RequirementUploadViewSet(viewsets.ViewSet):
     supported_formats: Get list of supported file formats
     """
 
+    # Disable authentication for development
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
     parser_classes = (MultiPartParser, FormParser)
 
     @action(detail=False, methods=['post'], url_path='upload')
@@ -28,7 +37,9 @@ class RequirementUploadViewSet(viewsets.ViewSet):
         Upload a requirement file and parse it.
 
         POST /api/v1/requirements/upload/
-        Form: { file, created_by?, title? }
+        Form: { file, created_by?, title?, auto_analyze? }
+
+        If auto_analyze is true (default), automatically starts matching analysis.
         """
         serializer = RequirementUploadSerializer(data=request.data)
 
@@ -38,28 +49,69 @@ class RequirementUploadViewSet(viewsets.ViewSet):
         uploaded_file = serializer.validated_data['file']
         created_by = serializer.validated_data.get('created_by', '')
         title = serializer.validated_data.get('title', '')
+        auto_analyze = request.data.get('auto_analyze', True)  # Default to True
 
+        # Use atomic transaction to ensure all database operations are committed together
+        # This is critical for SQLite to avoid "database is locked" errors with background tasks
         try:
-            service = FileParserService()
-            requirement = service.process_uploaded_file(
-                file=uploaded_file,
-                user=created_by,
-                auto_create_requirement=True
-            )
+            with transaction.atomic():
+                service = FileParserService()
+                requirement = service.process_uploaded_file(
+                    file=uploaded_file,
+                    user=created_by,
+                    auto_create_requirement=True
+                )
 
-            # Update title if provided
-            if title:
-                requirement.title = title
-                requirement.save()
+                # Update title if provided
+                if title:
+                    requirement.title = title
+                    requirement.save()
 
-            from apps.matching.serializers import CapabilityRequirementSerializer
-            result_serializer = CapabilityRequirementSerializer(requirement)
+                from apps.matching.serializers import CapabilityRequirementSerializer
+                result_serializer = CapabilityRequirementSerializer(requirement)
 
-            return Response({
-                'status': 'success',
-                'message': 'File uploaded and parsed successfully',
-                'requirement': result_serializer.data
-            }, status=status.HTTP_201_CREATED)
+                response_data = {
+                    'status': 'success',
+                    'message': 'File uploaded and parsed successfully',
+                    'requirement': result_serializer.data
+                }
+
+                # Auto-start matching analysis if requested
+                if auto_analyze:
+                    try:
+                        from apps.matching.task_service import BackgroundTaskService
+                        from django.db.transaction import on_commit
+
+                        # Capture requirement ID for the callback
+                        req_id = str(requirement.id)
+
+                        # Schedule async analysis to start after transaction commits
+                        # This is critical for SQLite to avoid "database is locked" errors
+                        def start_analysis():
+                            BackgroundTaskService.run_llm_analysis_task(
+                                requirement_id=req_id,
+                                llm_config_id=None,  # Use default LLM config
+                                llm_analysis_mode='full',
+                                threshold=0.75  # Default threshold
+                            )
+
+                        on_commit(start_analysis)
+
+                        response_data['auto_analysis'] = {
+                            'started': True,
+                            'message': 'Matching analysis scheduled to start after transaction commit'
+                        }
+
+                    except Exception as e:
+                        import logging
+                        logger = logging.getLogger(__name__)
+                        logger.error(f"Failed to start auto analysis: {e}", exc_info=True)
+                        response_data['auto_analysis'] = {
+                            'started': False,
+                            'error': str(e)
+                        }
+
+            return Response(response_data, status=status.HTTP_201_CREATED)
 
         except ValueError as e:
             error_msg = str(e)
@@ -100,28 +152,70 @@ class RequirementUploadViewSet(viewsets.ViewSet):
         Parse text requirements.
 
         POST /api/v1/requirements/parse_text/
-        Body: { requirement_text, created_by?, title? }
+        Body: { requirement_text, created_by?, title?, auto_analyze? }
+
+        If auto_analyze is true (default), automatically starts matching analysis.
         """
         requirement_text = request.data.get('requirement_text', '')
         created_by = request.data.get('created_by', '')
         title = request.data.get('title', '')
+        auto_analyze = request.data.get('auto_analyze', True)  # Default to True
 
         if not requirement_text or not requirement_text.strip():
             return Response({
                 'error': 'Requirement text cannot be empty'
             }, status=status.HTTP_400_BAD_REQUEST)
 
+        # Use atomic transaction to ensure all database operations are committed together
         try:
-            requirement = RequirementService.create_text_requirement(
-                title=title,
-                requirement_text=requirement_text,
-                user=created_by
-            )
+            with transaction.atomic():
+                requirement = RequirementService.create_text_requirement(
+                    title=title,
+                    requirement_text=requirement_text,
+                    user=created_by
+                )
 
-            from apps.matching.serializers import CapabilityRequirementSerializer
-            serializer = CapabilityRequirementSerializer(requirement)
+                from apps.matching.serializers import CapabilityRequirementSerializer
+                serializer = CapabilityRequirementSerializer(requirement)
 
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+                response_data = serializer.data
+
+                # Auto-start matching analysis if requested
+                if auto_analyze:
+                    try:
+                        from apps.matching.task_service import BackgroundTaskService
+                        from django.db.transaction import on_commit
+
+                        # Capture requirement ID for the callback
+                        req_id = str(requirement.id)
+
+                        # Schedule async analysis to start after transaction commits
+                        # This is critical for SQLite to avoid "database is locked" errors
+                        def start_analysis():
+                            BackgroundTaskService.run_llm_analysis_task(
+                                requirement_id=req_id,
+                                llm_config_id=None,  # Use default LLM config
+                                llm_analysis_mode='full',
+                                threshold=0.75  # Default threshold
+                            )
+
+                        on_commit(start_analysis)
+
+                        response_data['auto_analysis'] = {
+                            'started': True,
+                            'message': 'Matching analysis scheduled to start after transaction commit'
+                        }
+
+                    except Exception as e:
+                        import logging
+                        logger = logging.getLogger(__name__)
+                        logger.error(f"Failed to start auto analysis: {e}", exc_info=True)
+                        response_data['auto_analysis'] = {
+                            'started': False,
+                            'error': str(e)
+                        }
+
+            return Response(response_data, status=status.HTTP_201_CREATED)
 
         except Exception as e:
             return Response({

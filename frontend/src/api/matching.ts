@@ -22,7 +22,7 @@ export const matchingApi = {
     return post<CapabilityRequirement>(`${REQUIREMENTS_PREFIX}/`, data)
   },
 
-  uploadRequirement(file: File, createdBy?: string, title?: string) {
+  uploadRequirement(file: File, createdBy?: string, title?: string, autoAnalyze?: boolean) {
     const formData = new FormData()
     formData.append('file', file)
     if (createdBy) {
@@ -30,6 +30,9 @@ export const matchingApi = {
     }
     if (title) {
       formData.append('title', title)
+    }
+    if (autoAnalyze !== undefined) {
+      formData.append('auto_analyze', autoAnalyze.toString())
     }
     return upload<CapabilityRequirement>(`/v1/file-uploads/upload/`, formData)
   },
@@ -77,6 +80,25 @@ export const matchingApi = {
     llm_analysis_mode?: 'full' | 'quick'
   }) {
     return post<MatchAnalyzeResponse>(`${MATCHING_PREFIX}/analyze-enhanced/`, data)
+  },
+
+  analyzeAsync(data: {
+    requirement_id: string
+    threshold?: number
+    llm_config_id?: string
+    llm_analysis_mode?: 'full' | 'quick'
+  }) {
+    return post<{ task_id: string; status: string; message: string }>(`${MATCHING_PREFIX}/analyze-async/`, data)
+  },
+
+  getTaskStatus(taskId: string) {
+    return get<{
+      task_id: string
+      status: string
+      progress: number
+      result?: any
+      error?: string
+    }>(`${MATCHING_PREFIX}/task-status/${taskId}/`)
   },
 
   getMatchResults(requirementId: string) {

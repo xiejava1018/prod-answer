@@ -84,6 +84,14 @@
           </el-tab-pane>
         </el-tabs>
 
+        <!-- Auto Analysis Option -->
+        <el-form-item label="自动分析">
+          <el-switch v-model="autoAnalyze" active-text="提交后自动开始匹配分析" />
+          <div class="form-tip">
+            开启后将在创建需求时自动进行匹配分析，完成后直接跳转到结果页面
+          </div>
+        </el-form-item>
+
         <!-- Submit Buttons -->
         <el-form-item>
           <div class="button-group">
@@ -91,7 +99,7 @@
               type="primary"
               size="large"
               @click="handleSubmit"
-              :loading="submitting"
+              :loading="submitting || analyzing"
               :disabled="!canSubmit"
             >
               <el-icon><Check /></el-icon>
@@ -117,6 +125,55 @@
       @close="parsingError = null"
       class="mt-20"
     />
+
+    <!-- Progress Indicator -->
+    <el-card v-if="submitting || analyzing" class="mt-20 progress-card">
+      <template #header>
+        <div class="card-header">
+          <span>
+            <el-icon class="is-loading"><Loading /></el-icon>
+            处理进度
+          </span>
+          <el-tag v-if="currentStep" :type="getStepType(currentStep)">
+            {{ getStepText(currentStep) }}
+          </el-tag>
+        </div>
+      </template>
+
+      <!-- Progress Steps -->
+      <el-steps :active="activeStep" finish-status="success" align-center class="mb-20">
+        <el-step title="上传文件" />
+        <el-step title="解析需求" />
+        <el-step title="匹配分析" />
+        <el-step title="完成" />
+      </el-steps>
+
+      <!-- Progress Bar -->
+      <div class="progress-section">
+        <div class="progress-info">
+          <span>{{ progressMessage }}</span>
+          <el-tag>{{ progressPercent }}%</el-tag>
+        </div>
+        <el-progress
+          :percentage="progressPercent"
+          :status="progressStatus"
+          :stroke-width="20"
+          :text-inside="true"
+        />
+      </div>
+
+      <!-- Task Status Details -->
+      <div v-if="taskId" class="task-details">
+        <el-descriptions :column="2" border size="small">
+          <el-descriptions-item label="任务ID">
+            <el-text type="info">{{ taskId }}</el-text>
+          </el-descriptions-item>
+          <el-descriptions-item label="分析模式">
+            LLM 增强分析
+          </el-descriptions-item>
+        </el-descriptions>
+      </div>
+    </el-card>
 
     <!-- Preview -->
     <el-card v-if="textContent && activeTab === 'text'" class="mt-20">
@@ -175,7 +232,8 @@ import {
   Delete,
   UploadFilled,
   Connection,
-  Plus
+  Plus,
+  Loading
 } from '@element-plus/icons-vue'
 import type { RequirementItem } from '@/types'
 
@@ -185,10 +243,18 @@ const matchingStore = useMatchingStore()
 const title = ref('')
 const textContent = ref('')
 const submitting = ref(false)
+const analyzing = ref(false)  // 分析进行中
 const selectedFile = ref<File | null>(null)
 const uploadRef = ref()
 const activeTab = ref('text')
 const titleAutoFilled = ref(false) // 标记需求名称是否是从文件名自动填充的
+const autoAnalyze = ref(true)  // 默认开启自动分析
+
+// Progress state
+const currentStep = ref(0)  // 0: 上传, 1: 解析, 2: 分析, 3: 完成
+const progressMessage = ref('')
+const progressPercent = ref(0)
+const taskId = ref<string>('')
 
 const createdRequirements = ref<RequirementItem[]>([])
 const currentRequirementId = ref<string | null>(null)
@@ -217,6 +283,21 @@ const submitButtonText = computed(() => {
   } else {
     return '上传并解析'
   }
+})
+
+// Progress status
+const progressStatus = computed(() => {
+  if (analyzing.value) return 'warning'
+  if (progressPercent.value === 100) return 'success'
+  return ''
+})
+
+// Active step for progress indicator
+const activeStep = computed(() => {
+  if (submitting.value && currentStep.value === 0) return 0
+  if (analyzing.value) return 2
+  if (progressPercent.value === 100) return 3
+  return currentStep.value
 })
 
 // Methods
@@ -293,6 +374,11 @@ async function handleSubmit() {
   // Clear any previous errors
   parsingError.value = null
 
+  // Reset progress
+  currentStep.value = 0
+  progressPercent.value = 0
+  taskId.value = ''
+
   // 验证需求名称
   if (!title.value.trim()) {
     ElMessage.warning('请输入需求名称')
@@ -306,37 +392,72 @@ async function handleSubmit() {
 
   submitting.value = true
   try {
+    let requirementId: string
+
     if (activeTab.value === 'text' && textContent.value.trim()) {
-      // 文本提交
+      // 文本提交 - 步骤1: 上传
+      updateProgress(0, '正在创建需求...', 30)
+
       const requirement = await matchingStore.createTextRequirement({
         title: title.value,
         requirement_text: textContent.value,
         created_by: 'admin'
-      } as any)
+      }, autoAnalyze.value)  // 传递自动分析选项
 
+      requirementId = requirement.id
       currentRequirementId.value = requirement.id
       createdRequirements.value = requirement.items || []
 
-      ElMessage.success(`成功创建 ${requirement.items?.length || 0} 条需求`)
+      // 步骤2: 解析完成
+      updateProgress(1, `成功创建 ${requirement.items?.length || 0} 条需求`, 100)
+
       // 清空标题和内容，准备下一次输入
       title.value = ''
       textContent.value = ''
+
+      // 如果不自动分析，在这里停止
+      if (!autoAnalyze.value) {
+        ElMessage.success('需求创建成功！')
+        submitting.value = false
+        return
+      }
+
     } else if (activeTab.value === 'file' && selectedFile.value) {
-      // 文件上传
+      // 文件上传 - 步骤1: 上传
+      updateProgress(0, '正在上传文件...', 20)
+
       try {
         const requirement = await matchingStore.uploadRequirement(
           selectedFile.value,
           'admin',
-          title.value
+          title.value,
+          autoAnalyze.value  // 传递自动分析选项
         )
 
+        // 步骤2: 解析
+        updateProgress(1, `正在解析文件... (已识别 ${requirement.items?.length || 0} 条需求)`, 80)
+
+        requirementId = requirement.id
         currentRequirementId.value = requirement.id
         createdRequirements.value = requirement.items || []
 
-        ElMessage.success(`成功解析 ${requirement.items?.length || 0} 条需求`)
         clearFile()
         // 清空标题，准备下一次输入
         title.value = ''
+
+        // 如果不自动分析，在这里停止
+        if (!autoAnalyze.value) {
+          updateProgress(3, '解析完成！', 100)
+          ElMessage.success(`成功解析 ${requirement.items?.length || 0} 条需求`)
+          submitting.value = false
+          setTimeout(() => {
+            // Reset progress after 2 seconds
+            currentStep.value = 0
+            progressPercent.value = 0
+          }, 2000)
+          return
+        }
+
       } catch (fileError: any) {
         // Extract detailed error message
         const errorMsg = fileError.response?.data?.error || fileError.message || '文件解析失败'
@@ -354,16 +475,90 @@ async function handleSubmit() {
 4. 文件大小是否超过 10MB`
 
         ElMessage.error('文件解析失败，请查看下方错误详情')
+        submitting.value = false
         throw fileError
       }
+    }
+
+    // Auto-start matching analysis if enabled
+    if (autoAnalyze.value && requirementId) {
+      await handleAutoAnalysis(requirementId)
     }
   } catch (error: any) {
     // Error already handled above for file upload
     if (activeTab.value === 'text') {
       ElMessage.error(error.message || '操作失败')
     }
+  }
+}
+
+// Auto-start matching analysis
+async function handleAutoAnalysis(requirementId: string) {
+  analyzing.value = true
+
+  try {
+    // 步骤3: 开始分析
+    updateProgress(2, '正在启动LLM增强匹配分析...', 0)
+
+    // Start async analysis
+    const taskResponse = await matchingStore.analyzeAsync(
+      requirementId,
+      0.75,  // threshold
+      undefined,  // llm_config_id (use default)
+      'full'  // llm_analysis_mode
+    )
+
+    taskId.value = taskResponse.task_id
+    updateProgress(2, `LLM分析已启动（任务ID: ${taskResponse.task_id}）`, 0)
+
+    // Poll for completion with real-time progress updates
+    const result = await matchingStore.pollTaskStatus(
+      taskResponse.task_id,
+      120,  // max attempts
+      1000,  // interval (1 second)
+      (progress, status) => {
+        // Update progress based on actual backend progress
+        if (progress < 30) {
+          updateProgress(2, `正在进行向量匹配... ${progress}%`, progress)
+        } else if (progress < 90) {
+          updateProgress(2, `正在进行LLM增强分析... ${progress}%`, progress)
+        } else {
+          updateProgress(2, `正在完成最后处理... ${progress}%`, progress)
+        }
+      }
+    )
+
+    // Update to 100% when complete
+    updateProgress(3, '分析完成！正在跳转...', 100)
+
+    // Show success message and navigate to results
+    const matchCount = result.total_matches || 0
+    const itemCount = result.total_items || 0
+    const llmTime = result.llm_analysis_time?.toFixed(1) || 'N/A'
+
+    ElMessage.success({
+      message: `🎉 匹配分析完成！共 ${itemCount} 个需求项，匹配到 ${matchCount} 个结果（LLM耗时: ${llmTime}秒）`,
+      duration: 2000,
+      onClose: () => {
+        // Navigate to results page
+        router.push(`/matching/results/${requirementId}`)
+      }
+    })
+
+  } catch (error: any) {
+    console.error('Auto analysis error:', error)
+    ElMessage.error(error.response?.data?.error || error.message || '自动匹配分析失败')
+
+    // Reset progress
+    currentStep.value = 0
+    progressPercent.value = 0
+    taskId.value = ''
+
+    // Even if auto analysis failed, still offer option to view results
+    ElMessage.info('您可以稍后手动前往匹配分析页面查看结果')
   } finally {
     submitting.value = false
+    analyzing.value = false
   }
 }
 
@@ -421,6 +616,25 @@ function handleGoToMatching() {
   if (currentRequirementId.value) {
     router.push(`/matching/results/${currentRequirementId.value}`)
   }
+}
+
+// Progress helper functions
+function getStepType(step: number): string {
+  if (step === activeStep.value) return 'primary'
+  if (step < activeStep.value) return 'success'
+  return 'info'
+}
+
+function getStepText(step: number): string {
+  const steps = ['上传中', '解析中', '分析中', '已完成']
+  return steps[step] || ''
+}
+
+function updateProgress(step: number, message: string, percent: number) {
+  currentStep.value = step
+  progressMessage.value = message
+  progressPercent.value = Math.round(percent)  // Ensure integer value
+  console.log(`[Progress Update] Step: ${step}, Message: ${message}, Percent: ${progressPercent.value}%`)
 }
 </script>
 
@@ -490,5 +704,41 @@ function handleGoToMatching() {
 
 .text-center {
   text-align: center;
+}
+
+.form-tip {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+.progress-card {
+  border: 2px solid var(--el-color-primary);
+  background: var(--el-fill-color-blur);
+}
+
+.progress-section {
+  margin-top: 20px;
+}
+
+.progress-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+
+.task-details {
+  margin-top: 20px;
+}
+
+:deep(.el-progress-bar__inner) {
+  transition: all 0.3s ease;
+}
+
+:deep(.el-step__title) {
+  font-size: 14px;
 }
 </style>

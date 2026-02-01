@@ -172,33 +172,60 @@ class MatchingService:
                 )
                 all_matches.append(match_record)
 
-        # Calculate summary
+        # Calculate summary - count by requirement items, not match records
+        # Get unique requirement item IDs with matches
+        items_with_matched = set()
+        items_with_partial = set()
+        items_with_unmatched = set()
+
+        for match in all_matches:
+            item_id = match.requirement_item_id
+            if match.match_status == 'matched':
+                items_with_matched.add(item_id)
+            elif match.match_status == 'partial_matched':
+                items_with_partial.add(item_id)
+            elif match.match_status == 'unmatched':
+                items_with_unmatched.add(item_id)
+
+        # Items with only partial matches (excluding those with matched)
+        items_only_partial = items_with_partial - items_with_matched - items_with_unmatched
+        # Items with only unmatched records (excluding those with better matches)
+        items_only_unmatched = items_with_unmatched - items_with_matched - items_with_partial
+
+        # Items with any match (for calculating truly unmatched items)
+        items_with_any_match = items_with_matched | items_with_partial | items_with_unmatched
+        truly_unmatched = item_count - len(items_with_any_match)
+
         summary = {
             'requirement_id': str(requirement.id),
             'total_items': item_count,
             'total_matches': len(all_matches),
-            'matched': len([m for m in all_matches if m.match_status == 'matched']),
-            'partial_matched': len([m for m in all_matches if m.match_status == 'partial_matched']),
-            'unmatched': len([m for m in all_matches if m.match_status == 'unmatched']),
+            'matched': len(items_with_matched),
+            'partial_matched': len(items_only_partial),
+            'unmatched': truly_unmatched,  # Items with no matches at all
         }
 
         return summary
 
     def get_match_results(self, requirement_id: str) -> Dict[str, Any]:
         """
-        Get match results for a requirement.
+        Get match results for a requirement, including LLM analysis if available.
 
         Args:
             requirement_id: UUID of the requirement
 
         Returns:
-            Dictionary with match results grouped by status
+            Dictionary with match results grouped by status, including LLM data
+            Includes requirement items with no matches in 'unmatched' list
         """
+        from .models import CapabilityRequirement
+
         matches = MatchRecord.objects.filter(
             requirement_id=requirement_id
         ).select_related(
             'requirement_item__requirement',
-            'feature__product'
+            'feature__product',
+            'llm_analysis'
         ).order_by('-similarity_score')
 
         # Group by status
@@ -208,16 +235,65 @@ class MatchingService:
             'unmatched': [],
         }
 
+        # Track requirement items that have matches
+        items_with_matches = set()
+
         for match in matches:
-            results[match.match_status].append({
+            match_data = {
                 'id': str(match.id),
+                'requirement_item_id': str(match.requirement_item.id),
                 'requirement_item_text': match.requirement_item.item_text,
+                'feature_id': str(match.feature.id),
                 'feature_name': match.feature.feature_name,
                 'feature_description': match.feature.description,
                 'product_name': match.feature.product.name,
                 'similarity_score': match.similarity_score,
                 'rank': match.rank,
-            })
+                'match_status': match.match_status,
+            }
+
+            # Add LLM enhancement data if available
+            if match.llm_analysis:
+                match_data['llm_analysis'] = {
+                    'is_valid_match': match.llm_analysis.is_valid_match,
+                    'confidence_score': match.llm_analysis.confidence_score,
+                    'match_reason': match.llm_analysis.match_reason,
+                    'keywords_from_requirement': match.llm_analysis.keywords_from_requirement,
+                    'keywords_from_feature': match.llm_analysis.keywords_from_feature,
+                }
+
+                # Add fusion data if available
+                if match.final_confidence is not None:
+                    match_data['final_confidence'] = match.final_confidence
+
+                if match.is_llm_corrected:
+                    match_data['is_llm_corrected'] = match.is_llm_corrected
+                    match_data['original_match_status'] = match.original_match_status
+
+            results[match.match_status].append(match_data)
+            items_with_matches.add(match.requirement_item_id)
+
+        # Add requirement items with no matches to 'unmatched' list
+        try:
+            requirement = CapabilityRequirement.objects.get(id=requirement_id)
+            for item in requirement.items.all():
+                if item.id not in items_with_matches:
+                    # This item has no matches at all
+                    results['unmatched'].append({
+                        'id': None,  # No match record
+                        'requirement_item_id': str(item.id),
+                        'requirement_item_text': item.item_text,
+                        'feature_id': None,
+                        'feature_name': None,
+                        'feature_description': None,
+                        'product_name': None,
+                        'similarity_score': 0.0,
+                        'rank': None,
+                        'match_status': 'unmatched',
+                        'no_match': True,  # Flag to indicate this item has no matches
+                    })
+        except CapabilityRequirement.DoesNotExist:
+            pass
 
         return results
 
@@ -252,17 +328,54 @@ class MatchingService:
             min_similarity=Min('similarity_score'),
         )
 
-        # Count by status
-        status_counts = {}
-        for status in ['matched', 'partial_matched', 'unmatched']:
-            count = matches.filter(match_status=status).count()
-            status_counts[status] = count
+        # Count by requirement items, not match records
+        # Get requirement item IDs that have matches
+        items_with_matches = matches.values_list('requirement_item_id').distinct()
+
+        # Count items with 'matched' status (highest priority - if item has any matched match)
+        items_with_matched = MatchRecord.objects.filter(
+            requirement_id=requirement_id,
+            match_status='matched'
+        ).values_list('requirement_item_id').distinct().count()
+
+        # Count items with only 'partial_matched' status (exclude items that have 'matched')
+        items_with_partial = MatchRecord.objects.filter(
+            requirement_id=requirement_id,
+            match_status='partial_matched'
+        ).exclude(
+            requirement_item_id__in=MatchRecord.objects.filter(
+                requirement_id=requirement_id,
+                match_status='matched'
+            ).values_list('requirement_item_id')
+        ).values_list('requirement_item_id').distinct().count()
+
+        # Count items with only 'unmatched' status (failed matches)
+        items_with_unmatched = MatchRecord.objects.filter(
+            requirement_id=requirement_id,
+            match_status='unmatched'
+        ).exclude(
+            requirement_item_id__in=MatchRecord.objects.filter(
+                requirement_id=requirement_id,
+                match_status__in=['matched', 'partial_matched']
+            ).values_list('requirement_item_id')
+        ).values_list('requirement_item_id').distinct().count()
+
+        # Calculate truly unmatched items (no matches at all)
+        items_with_any_match = items_with_matches.count()
+        truly_unmatched = total_items - items_with_any_match
+
+        status_counts = {
+            'matched': items_with_matched,
+            'partial_matched': items_with_partial,
+            'unmatched': truly_unmatched,  # Items with no matches
+            'unmatched_records': items_with_unmatched,  # Items with failed matches
+        }
 
         stats['status_counts'] = status_counts
         stats['total_items'] = total_items
-        stats['matched'] = status_counts.get('matched', 0)
-        stats['partial_matched'] = status_counts.get('partial_matched', 0)
-        stats['unmatched'] = status_counts.get('unmatched', 0)
+        stats['matched'] = items_with_matched
+        stats['partial_matched'] = items_with_partial
+        stats['unmatched'] = truly_unmatched
 
         return stats
 
@@ -392,7 +505,8 @@ class EnhancedMatchingService(MatchingService):
         requirement_id: str,
         llm_config_id: Optional[str] = None,
         analysis_mode: str = 'full',
-        generate_embeddings: bool = True
+        generate_embeddings: bool = True,
+        task_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Process a requirement with LLM-enhanced matching analysis.
@@ -410,7 +524,7 @@ class EnhancedMatchingService(MatchingService):
             Dictionary with processing results including LLM analysis
         """
         import logging
-        import signal
+        import threading
         from contextlib import contextmanager
 
         logger = logging.getLogger(__name__)
@@ -419,20 +533,26 @@ class EnhancedMatchingService(MatchingService):
         class TimeoutError(Exception):
             pass
 
-        def timeout_handler(signum, frame):
-            raise TimeoutError("LLM analysis timed out")
-
         @contextmanager
         def time_limit(seconds):
-            """Context manager to limit execution time."""
-            def signal_handler(signum, frame):
-                raise TimeoutError("Timed out")
-            signal.signal(signal.SIGALRM, signal_handler)
-            signal.alarm(seconds)
+            """Context manager to limit execution time (thread-safe)."""
+            timeout_raised = [False]
+
+            def timeout_handler():
+                timeout_raised[0] = True
+                raise TimeoutError("LLM analysis timed out")
+
+            timer = threading.Timer(seconds, timeout_handler)
+            timer.start()
             try:
                 yield
+            except TimeoutError:
+                raise
             finally:
-                signal.alarm(0)
+                timer.cancel()
+                # Wait a bit for timer thread to finish
+                if timer.is_alive():
+                    timer.join(timeout=0.1)
 
         # First, perform standard matching (always works)
         start_time = time.time()
@@ -443,6 +563,12 @@ class EnhancedMatchingService(MatchingService):
             )
             vector_time = time.time() - start_time
             vector_success = True
+
+            # Update task progress after vector matching (30%)
+            if task_id:
+                from .task_service import BackgroundTaskService
+                BackgroundTaskService.set_task_status(task_id, 'processing', 30)
+
         except Exception as e:
             logger.error(f"Vector matching failed: {e}", exc_info=True)
             # If vector matching fails, we cannot proceed
@@ -455,104 +581,237 @@ class EnhancedMatchingService(MatchingService):
         llm_analysis_time = 0
         llm_timeout_limit = 10  # 10 seconds timeout for LLM analysis
 
-        if llm_config_id:
-            try:
-                from apps.llm.services import LLMProviderFactory
-                from apps.llm.models import LLMAnalysisResult
+        # Import asyncio for running async functions
+        import asyncio
 
-                # Get LLM provider
-                llm_provider = LLMProviderFactory.create_provider_by_config_id(
-                    llm_config_id,
-                    use_cache=True
-                )
+        # Get LLM provider (use default if not specified)
+        from apps.llm.services import LLMProviderFactory
+        from apps.llm.models import LLMAnalysisResult
 
-                # Get top matches for analysis
-                top_matches = MatchRecord.objects.filter(
-                    requirement_id=requirement_id
-                ).select_related(
-                    'requirement_item',
-                    'feature__product'
-                ).order_by('-similarity_score')[:10]  # Analyze top 10 matches
+        try:
+            # Get LLM provider (use default config if llm_config_id is not provided)
+            if llm_config_id:
+                llm_provider = LLMProviderFactory.get_provider_by_id(llm_config_id)
+            else:
+                logger.info("No llm_config_id provided, using default LLM configuration")
+                llm_provider = LLMProviderFactory.get_default_provider()
 
-                # Perform LLM analysis for each match with timeout
-                for match_record in top_matches:
+            # Get matches for analysis (only matched and partial_matched, skip unmatched to save cost)
+            top_matches = MatchRecord.objects.filter(
+                requirement_id=requirement_id,
+                match_status__in=['matched', 'partial_matched']
+            ).select_related(
+                'requirement_item',
+                'feature__product'
+            ).order_by('-similarity_score')  # Analyze all valid matches
+
+            if not top_matches:
+                logger.info(f"No valid matches found for requirement {requirement_id}, skipping LLM analysis")
+            else:
+                logger.info(f"Performing BATCH LLM analysis on {len(top_matches)} valid matches (matched and partial_matched only)")
+
+            # BATCH ANALYSIS: Process in chunks of 20 matches each
+            BATCH_SIZE = 20  # Process 20 matches per batch to avoid token limits
+
+            if top_matches:
+                # Split into batches
+                match_batches = []
+                for i in range(0, len(top_matches), BATCH_SIZE):
+                    batch = top_matches[i:i + BATCH_SIZE]
+                    match_batches.append(batch)
+
+                logger.info(f"Split {len(top_matches)} matches into {len(match_batches)} batches of max {BATCH_SIZE} each")
+
+                total_llm_time = 0
+                total_batches_processed = 0
+                total_batches_failed = 0
+
+                for batch_idx, batch_matches in enumerate(match_batches):
+                    logger.info(f"Processing batch {batch_idx + 1}/{len(match_batches)} with {len(batch_matches)} matches")
+
+                    # Prepare batch data
+                    matches_data = []
+                    match_records_list = []
+
+                    for match_record in batch_matches:
+                        matches_data.append({
+                            'requirement_text': match_record.requirement_item.item_text,
+                            'feature_name': match_record.feature.feature_name,
+                            'feature_description': match_record.feature.description,
+                            'similarity_score': match_record.similarity_score
+                        })
+                        match_records_list.append(match_record)
+
+                    # Call LLM for batch analysis with timeout
+                    llm_start = time.time()
+
                     try:
-                        # Prepare analysis request
-                        requirement_text = match_record.requirement_item.item_text
-                        feature_description = match_record.feature.description
-                        feature_name = match_record.feature.feature_name
+                        with time_limit(llm_timeout_limit * 3):  # 3x timeout per batch (30 seconds)
+                            # Run async batch analysis function in sync context
+                            batch_result = asyncio.run(llm_provider.analyze_matches_batch(matches_data))
 
-                        # Call LLM for analysis with timeout
-                        llm_start = time.time()
+                        llm_time = time.time() - llm_start
+                        total_llm_time += llm_time
+                        total_batches_processed += 1
 
-                        try:
-                            with time_limit(llm_timeout_limit):
-                                analysis_result = llm_provider.analyze_match(
+                        # Update task progress after each batch (30% to 90%)
+                        if task_id:
+                            from .task_service import BackgroundTaskService
+                            # Calculate progress: 30% (vector done) + (batch_progress * 60%)
+                            batch_progress = (batch_idx + 1) / len(match_batches)
+                            current_progress = int(30 + (batch_progress * 60))
+                            BackgroundTaskService.set_task_status(
+                                task_id,
+                                'processing',
+                                current_progress
+                            )
+                            logger.info(f"Updated task progress to {current_progress}%")
+
+                        logger.info(f"Batch {batch_idx + 1} LLM analysis completed in {llm_time:.2f}s for {len(matches_data)} matches")
+                        logger.info(f"Tokens used: {batch_result.get('tokens_used', {})}")
+                        logger.info(f"Estimated cost: ${batch_result.get('estimated_cost', {}).get('total_cost', 0):.6f} USD")
+
+                        # Process batch results and save to database
+                        indexed_results = batch_result.get('indexed_results', {})
+
+                        for idx, match_record in enumerate(match_records_list):
+                            if idx not in indexed_results:
+                                logger.warning(f"No LLM result for match {match_record.id} at index {idx} in batch {batch_idx + 1}")
+                                continue
+
+                            analysis_result = indexed_results[idx]
+
+                            # Save or update LLM analysis result
+                            llm_result, created = LLMAnalysisResult.objects.update_or_create(
+                                requirement_item=match_record.requirement_item,
+                                feature=match_record.feature,
+                                defaults={
+                                    'is_valid_match': analysis_result.get('is_valid_match'),
+                                    'confidence_score': analysis_result.get('confidence_score', 0.5),
+                                    'match_reason': analysis_result.get('match_reason', ''),
+                                    'keywords_from_requirement': analysis_result.get('keywords_from_requirement', []),
+                                    'keywords_from_feature': analysis_result.get('keywords_from_feature', []),
+                                    'llm_provider': llm_provider.provider,
+                                    'llm_model': llm_provider.model_name,
+                                    'prompt_tokens': batch_result.get('tokens_used', {}).get('prompt_tokens', 0) // len(matches_data),
+                                    'completion_tokens': batch_result.get('tokens_used', {}).get('completion_tokens', 0) // len(matches_data),
+                                    'total_tokens': batch_result.get('tokens_used', {}).get('total_tokens', 0) // len(matches_data),
+                                    'analysis_metadata': {
+                                        'batch_index': idx,
+                                        'batch_number': batch_idx + 1,
+                                        'total_batches': len(match_batches),
+                                        'batch_total': len(matches_data),
+                                        'batch_tokens': batch_result.get('tokens_used', {})
+                                    }
+                                }
+                            )
+
+                            # Calculate final confidence (fusion of vector and LLM)
+                            final_confidence = self._calculate_final_confidence(
+                                vector_score=match_record.similarity_score,
+                                llm_confidence=llm_result.confidence_score
+                            )
+
+                            # Update match record with LLM analysis
+                            match_record.llm_analysis = llm_result
+                            match_record.final_confidence = final_confidence
+
+                            # Check if LLM corrected the match status
+                            if llm_result.is_valid_match is False and match_record.match_status == 'matched':
+                                match_record.is_llm_corrected = True
+                                match_record.original_match_status = match_record.match_status
+                                match_record.match_status = 'partial_matched'  # Downgrade
+                            elif llm_result.is_valid_match is True and match_record.match_status == 'unmatched':
+                                match_record.is_llm_corrected = True
+                                match_record.original_match_status = match_record.match_status
+                                match_record.match_status = 'partial_matched'  # Upgrade
+
+                            match_record.save()
+                            llm_analysis_performed = True
+
+                    except TimeoutError:
+                        logger.warning(f"Batch {batch_idx + 1} LLM analysis timed out after {llm_timeout_limit * 3}s")
+                        llm_analysis_timeout = True
+                        total_batches_failed += 1
+                        continue  # Skip to next batch
+
+                    except Exception as e:
+                        logger.error(f"Batch {batch_idx + 1} LLM analysis failed: {e}", exc_info=True)
+                        llm_analysis_failed = True
+                        total_batches_failed += 1
+                        # Try individual analysis for this batch as fallback
+                        logger.info(f"Attempting individual analysis for batch {batch_idx + 1}")
+
+                        for match_record in batch_matches[:5]:  # Limit to 5 per failed batch
+                            try:
+                                requirement_text = match_record.requirement_item.item_text
+                                feature_description = match_record.feature.description
+                                feature_name = match_record.feature.feature_name
+
+                                llm_start = time.time()
+                                analysis_result = asyncio.run(llm_provider.analyze_match(
                                     requirement_text=requirement_text,
                                     feature_name=feature_name,
                                     feature_description=feature_description,
                                     similarity_score=match_record.similarity_score
+                                ))
+                                llm_time = time.time() - llm_start
+                                total_llm_time += llm_time
+
+                                llm_result, created = LLMAnalysisResult.objects.update_or_create(
+                                    requirement_item=match_record.requirement_item,
+                                    feature=match_record.feature,
+                                    defaults={
+                                        'is_valid_match': analysis_result.get('is_valid_match'),
+                                        'confidence_score': analysis_result.get('confidence_score', 0.5),
+                                        'match_reason': analysis_result.get('match_reason', ''),
+                                        'keywords_from_requirement': analysis_result.get('keywords_from_requirement', []),
+                                        'keywords_from_feature': analysis_result.get('keywords_from_feature', []),
+                                        'llm_provider': llm_provider.provider,
+                                        'llm_model': llm_provider.model_name,
+                                        'prompt_tokens': analysis_result.get('prompt_tokens', 0),
+                                        'completion_tokens': analysis_result.get('completion_tokens', 0),
+                                        'total_tokens': analysis_result.get('total_tokens', 0),
+                                        'analysis_metadata': {
+                                            'fallback_analysis': True,
+                                            'failed_batch': batch_idx + 1
+                                        }
+                                    }
                                 )
-                        except TimeoutError:
-                            logger.warning(f"LLM analysis timed out for match {match_record.id}")
-                            llm_analysis_timeout = True
-                            continue  # Skip this match and continue with next
 
-                        llm_time = time.time() - llm_start
-                        llm_analysis_time += llm_time
+                                final_confidence = self._calculate_final_confidence(
+                                    vector_score=match_record.similarity_score,
+                                    llm_confidence=llm_result.confidence_score
+                                )
 
-                        # Save or update LLM analysis result
-                        llm_result, created = LLMAnalysisResult.objects.update_or_create(
-                            requirement_item=match_record.requirement_item,
-                            feature=match_record.feature,
-                            defaults={
-                                'is_valid_match': analysis_result.get('is_valid_match'),
-                                'confidence_score': analysis_result.get('confidence_score', 0.5),
-                                'match_reason': analysis_result.get('match_reason', ''),
-                                'keywords_from_requirement': analysis_result.get('keywords_from_requirement', []),
-                                'keywords_from_feature': analysis_result.get('keywords_from_feature', []),
-                                'llm_provider': llm_provider.provider,
-                                'llm_model': llm_provider.model_name,
-                                'prompt_tokens': analysis_result.get('prompt_tokens', 0),
-                                'completion_tokens': analysis_result.get('completion_tokens', 0),
-                                'total_tokens': analysis_result.get('total_tokens', 0),
-                                'analysis_metadata': analysis_result.get('metadata', {})
-                            }
-                        )
+                                match_record.llm_analysis = llm_result
+                                match_record.final_confidence = final_confidence
 
-                        # Calculate final confidence (fusion of vector and LLM)
-                        final_confidence = self._calculate_final_confidence(
-                            vector_score=match_record.similarity_score,
-                            llm_confidence=llm_result.confidence_score
-                        )
+                                if llm_result.is_valid_match is False and match_record.match_status == 'matched':
+                                    match_record.is_llm_corrected = True
+                                    match_record.original_match_status = match_record.match_status
+                                    match_record.match_status = 'partial_matched'
+                                elif llm_result.is_valid_match is True and match_record.match_status == 'unmatched':
+                                    match_record.is_llm_corrected = True
+                                    match_record.original_match_status = match_record.match_status
+                                    match_record.match_status = 'partial_matched'
 
-                        # Update match record with LLM analysis
-                        match_record.llm_analysis = llm_result
-                        match_record.final_confidence = final_confidence
+                                match_record.save()
+                                llm_analysis_performed = True
 
-                        # Check if LLM corrected the match status
-                        if llm_result.is_valid_match is False and match_record.match_status == 'matched':
-                            match_record.is_llm_corrected = True
-                            match_record.original_match_status = match_record.match_status
-                            match_record.match_status = 'partial_matched'  # Downgrade
-                        elif llm_result.is_valid_match is True and match_record.match_status == 'unmatched':
-                            match_record.is_llm_corrected = True
-                            match_record.original_match_status = match_record.match_status
-                            match_record.match_status = 'partial_matched'  # Upgrade
+                            except Exception as e:
+                                logger.warning(f"Fallback LLM analysis failed for match {match_record.id}: {e}")
+                                continue
 
-                        match_record.save()
-                        llm_analysis_performed = True
+                # After processing all batches
+                llm_analysis_time = total_llm_time
+                logger.info(f"Batch LLM analysis summary: {total_batches_processed}/{len(match_batches)} batches succeeded, {total_batches_failed} failed")
+                logger.info(f"Total LLM analysis time: {total_llm_time:.2f}s")
 
-                    except Exception as e:
-                        logger.warning(f"LLM analysis failed for match {match_record.id}: {e}")
-                        llm_analysis_failed = True
-                        # Continue with next match (graceful degradation)
-                        continue
-
-            except Exception as e:
-                logger.error(f"LLM analysis failed completely: {e}", exc_info=True)
-                # Vector matching already succeeded, so we can still return results
-                llm_analysis_failed = True
+        except Exception as e:
+            logger.error(f"LLM analysis failed completely: {e}", exc_info=True)
+            # Vector matching already succeeded, so we can still return results
+            llm_analysis_failed = True
 
         # Update result with LLM information
         result['llm_analysis_performed'] = llm_analysis_performed

@@ -337,6 +337,11 @@ class LLMCache(TimeStampedModel):
         self.hit_count += 1
         self.save(update_fields=['hit_count'])
 
+    async def aincrement_hit_count(self):
+        """Async version of increment_hit_count."""
+        self.hit_count += 1
+        await self.asave(update_fields=['hit_count'])
+
 
 class LLMUsageLog(TimeStampedModel):
     """

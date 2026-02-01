@@ -132,7 +132,7 @@ class LLMProviderFactory:
         return provider
 
     @classmethod
-    def get_default_provider(cls) -> BaseLLMProvider:
+    async def get_default_provider(cls) -> BaseLLMProvider:
         """
         Get the default LLM provider.
 
@@ -148,6 +148,7 @@ class LLMProviderFactory:
         """
         try:
             from .models import LLMModelConfig
+            from asgiref.sync import sync_to_async
         except ImportError:
             raise ValueError(
                 "LLMModelConfig model not found. "
@@ -155,16 +156,16 @@ class LLMProviderFactory:
             )
 
         # Try to get default config
-        config = LLMModelConfig.objects.filter(
+        config = await sync_to_async(LLMModelConfig.objects.filter(
             is_default=True,
             is_active=True
-        ).first()
+        ).first)()
 
         if not config:
             # If no default, use first active config
-            config = LLMModelConfig.objects.filter(
+            config = await sync_to_async(LLMModelConfig.objects.filter(
                 is_active=True
-            ).first()
+            ).first)()
 
         if not config:
             raise ValueError(
@@ -399,16 +400,16 @@ class LLMAnalysisService:
         self.use_cache = use_cache
         self._provider = None
 
-    def _get_provider(self) -> BaseLLMProvider:
+    async def _get_provider(self) -> BaseLLMProvider:
         """Get or create provider instance."""
         if self._provider is None:
             if self.config_id:
                 self._provider = LLMProviderFactory.get_provider_by_id(self.config_id)
             else:
-                self._provider = LLMProviderFactory.get_default_provider()
+                self._provider = await LLMProviderFactory.get_default_provider()
         return self._provider
 
-    def _generate_cache_key(
+    async def _generate_cache_key(
         self,
         requirement_text: str,
         feature_ids: List[str],
@@ -426,12 +427,13 @@ class LLMAnalysisService:
             SHA-256 hash as hexadecimal string
         """
         # Create a deterministic string from inputs
+        provider = await self._get_provider()
         key_data = {
             'requirement': requirement_text,
             'features': sorted(feature_ids),
             'mode': mode,
-            'provider': self._get_provider().config.get('provider'),
-            'model': self._get_provider().config.get('model_name')
+            'provider': provider.config.get('provider'),
+            'model': provider.config.get('model_name')
         }
         key_string = json.dumps(key_data, sort_keys=True)
 
@@ -497,7 +499,7 @@ class LLMAnalysisService:
         try:
             from .models import LLMCache
 
-            provider = self._get_provider()
+            provider = await self._get_provider()
             expires_at = timezone.now() + timedelta(days=self.CACHE_EXPIRY_DAYS)
 
             cache_entry = LLMCache(
@@ -544,7 +546,7 @@ class LLMAnalysisService:
             ConnectionError: If connection fails after retries
             TimeoutError: If request times out after retries
         """
-        provider = self._get_provider()
+        provider = await self._get_provider()
 
         # Use semaphore to limit concurrent calls
         async with self._semaphore:
@@ -578,6 +580,49 @@ class LLMAnalysisService:
             except Exception as e:
                 logger.error(f"LLM call failed: {e}")
                 raise
+            finally:
+                # Record usage log
+                try:
+                    from .models import LLMUsageLog
+                    from django.utils import timezone
+                    import uuid
+
+                    # Calculate token usage
+                    prompt_tokens = provider.count_tokens(system_prompt + user_prompt)
+                    # Assume some completion tokens if not available
+                    completion_tokens = 0
+                    total_tokens = prompt_tokens + completion_tokens
+
+                    # Estimate cost
+                    cost_estimate = provider.estimate_cost(prompt_tokens, completion_tokens)
+                    total_cost = cost_estimate['total_cost']
+
+                    # Create usage log entry
+                    log_entry = LLMUsageLog(
+                        REQUEST_ID=str(uuid.uuid4()),
+                        timestamp=timezone.now(),
+                        provider=provider.config.get('provider', 'unknown'),
+                        model=provider.config.get('model_name', 'unknown'),
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        total_tokens=total_tokens,
+                        cost_usd=total_cost,
+                        request_type='analysis',
+                        feature_count=1,
+                        cache_hit=False,
+                        response_time_ms=0,  # TODO: Measure actual response time
+                        status='success' if 'response' in locals() else 'error',
+                        error_message=str(e) if 'e' in locals() else '',
+                        metadata={
+                            'system_prompt_length': len(system_prompt),
+                            'user_prompt_length': len(user_prompt),
+                            'config_id': self.config_id
+                        }
+                    )
+                    await log_entry.asave()
+                    logger.debug(f"LLM usage log created: {log_entry.REQUEST_ID}")
+                except Exception as log_error:
+                    logger.warning(f"Failed to create LLM usage log: {log_error}")
 
     def _parse_llm_response(self, response_text: str) -> Dict[str, Any]:
         """
@@ -629,6 +674,10 @@ class LLMAnalysisService:
         required_fields = output_schema.get("required", [])
         for field in required_fields:
             if field not in response:
+                # If match_details is missing but detailed_analysis exists, use that instead
+                if field == "match_details" and "detailed_analysis" in response:
+                    response["match_details"] = response["detailed_analysis"]
+                    continue
                 logger.error(f"Missing required field in LLM response: {field}")
                 return False
         return True
@@ -663,7 +712,7 @@ class LLMAnalysisService:
         """
         # Generate cache key
         feature_ids = [c.get('feature_id', c.get('id', '')) for c in candidates]
-        cache_key = self._generate_cache_key(requirement_text, feature_ids, mode)
+        cache_key = await self._generate_cache_key(requirement_text, feature_ids, mode)
 
         # Check cache first
         cached_result = await self._get_cached_result(cache_key)
