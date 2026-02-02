@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     'apps.matching',
     'apps.requirements',
     'apps.reports',
+    'apps.portal',
 ]
 
 MIDDLEWARE = [
