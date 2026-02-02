@@ -2,12 +2,19 @@
  * Vue Router configuration
  */
 import { createRouter, createWebHistory, RouteRecordRaw } from 'vue-router'
+import portalRoutes from './portal'
 
 const routes: RouteRecordRaw[] = [
   {
     path: '/',
     redirect: '/dashboard'
   },
+  
+  // 门户路由
+  ...portalRoutes,
+  
+  {
+    path: '/dashboard',
   {
     path: '/dashboard',
     name: 'Dashboard',

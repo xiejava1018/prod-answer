@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     'apps.requirements',
     'apps.reports',
     'apps.llm',
+    'apps.portal',
 ]
 
 MIDDLEWARE = [
