@@ -68,7 +68,7 @@ class PortalProductDetailSerializer(PortalProductSerializer):
     related_products = serializers.SerializerMethodField()
     
     class Meta(PortalProductSerializer.Meta):
-        fields = PortalProductSerializer.Meta.Meta.fields + [
+        fields = PortalProductSerializer.Meta.fields + [
             'features',
             'spec_metadata',
             'spec_metadata_display',

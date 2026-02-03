@@ -14,11 +14,19 @@ class CustomPageNumberPagination(PageNumberPagination):
     max_page_size = 100
 
     def paginate_queryset(self, queryset, request, view=None):
+        """Handle pagination with proper error handling."""
         try:
+            # Don't paginate if explicitly disabled
+            if request.query_params.get('no_page', '').lower() == 'true':
+                return None
             return super().paginate_queryset(queryset, request, view)
-        except Exception:
-            # If page is out of range, return empty list
-            return list()
+        except Exception as e:
+            # Log the error for debugging
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Pagination error: {e}, returning full queryset")
+            # Return None to disable pagination for this request
+            return None
 
     def get_paginated_response(self, data):
         """

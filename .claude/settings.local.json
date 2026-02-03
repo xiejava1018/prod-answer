@@ -31,7 +31,9 @@
       "Bash(npx playwright test:*)",
       "Bash(pip install:*)",
       "Bash(git fetch:*)",
-      "Bash(git stash:*)"
+      "Bash(git stash:*)",
+      "Bash(source venv/Scripts/activate:*)",
+      "Bash(export DJANGO_SETTINGS_MODULE=config.settings.development:*)"
     ]
   }
 }
