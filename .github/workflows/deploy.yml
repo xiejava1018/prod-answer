@@ -119,11 +119,10 @@ jobs:
             # Create logs directory if it doesn't exist
             mkdir -p logs
 
-            # Fix permissions
+            # Fix permissions (root deployment)
             echo "Fixing file permissions..."
-            chmod o+x /home/xiejava 2>/dev/null || true
             chmod -R 755 "$DEPLOY_PATH"
-            chown -R www-data:www-data "$DEPLOY_PATH/frontend/dist"
+            chown -R root:root "$DEPLOY_PATH/frontend/dist"
             chmod 660 "$DEPLOY_PATH/backend/prod-answer.sock" 2>/dev/null || true
 
             # Clean up Python cache files
@@ -196,7 +195,7 @@ jobs:
             [Service]
             Type=notify
             User=root
-            Group=xiejava
+            Group=root
             WorkingDirectory=$DEPLOY_PATH/backend
             Environment='PATH=$DEPLOY_PATH/venv/bin:/usr/local/bin:/usr/bin:/bin'
             Environment='DJANGO_SETTINGS_MODULE=config.settings.production'
