@@ -23,32 +23,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Sync code to server via rsync
-        run: |
-          echo "Syncing code to server..."
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > /tmp/deploy_key
-          chmod 600 /tmp/deploy_key
-
-          # Sync project files (exclude unnecessary files)
-          rsync -avz --delete \
-            -e "ssh -p ${{ secrets.SSH_PORT }} -i /tmp/deploy_key -o StrictHostKeyChecking=no" \
-            --exclude='.git' \
-            --exclude='venv' \
-            --exclude='frontend/node_modules' \
-            --exclude='frontend/dist' \
-            --exclude='backend/media' \
-            --exclude='backend/staticfiles' \
-            --exclude='*.pyc' \
-            --exclude='__pycache__' \
-            --exclude='.DS_Store' \
-            --exclude='backend/logs' \
-            --exclude='backups' \
-            ./ ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }}:${{ secrets.DEPLOY_PATH }}/
-
-          # Clean up key
-          rm /tmp/deploy_key
-          echo "Code sync completed"
-
       - name: Deploy to server via SSH
         uses: appleboy/ssh-action@v1.0.0
         with:
@@ -78,9 +52,17 @@ jobs:
               echo "Database backed up to: $BACKUP_DIR/db.sqlite3.$TIMESTAMP"
             fi
 
-            # Note: Code will be synced via rsync in the next step
-            # Skip git pull since GitHub is not accessible from this server
-            echo "Skipping git pull (code will be synced via rsync)"
+            # Pull latest code
+            echo "Pulling latest code..."
+            cd "$DEPLOY_PATH"
+
+            # Configure Git to trust this directory (fixes ownership issues)
+            echo "Configuring Git safe directory..."
+            git config --global --add safe.directory "$DEPLOY_PATH"
+
+            # Reset to latest main (handles local changes automatically)
+            git fetch origin main
+            git reset --hard origin/main
 
             # Create virtual environment if it doesn't exist
             if [ ! -d "venv" ]; then
