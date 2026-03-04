@@ -60,6 +60,10 @@ jobs:
             echo "Configuring Git safe directory..."
             git config --global --add safe.directory "$DEPLOY_PATH"
 
+            # Use SSH instead of HTTPS to avoid SSL timeout
+            echo "Setting git remote to SSH..."
+            git remote set-url origin git@github.com:xiejava1018/prod-answer.git
+
             # Reset to latest main (handles local changes automatically)
             git fetch origin main
             git reset --hard origin/main
